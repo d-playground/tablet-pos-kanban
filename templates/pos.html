@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>POS 시스템</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .pos-grid {
+            display: grid;
+            grid-template-columns: 65% 35%;
+            gap: 20px;
+            height: calc(100vh - 100px);
+        }
+
+        .menu-section {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            overflow-y: auto;
+            gap: 20px;
+        }
+
+        .menu-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            padding: 10px;
+        }
+
+        .menu-btn {
+            height: 100px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            touch-action: manipulation;
+        }
+
+        .order-summary {
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            height: 100%;
+        }
+
+        #selected-items {
+            overflow-y: auto;
+            margin: 10px 0;
+            padding: 15px;
+        }
+
+        .order-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .delete-btn {
+            background-color: #ff5722;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            font-size: 20px;
+        }
+
+        .total-section {
+            padding: 15px;
+            border-top: 2px solid #ddd;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        button {
+            width: 100%;
+            height: 60px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .submit-btn {
+            background-color: #ff5722;
+            color: white;
+            font-size: 18px;
+            height: 70px;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+
+        .table-selection {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .table-select {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            min-width: 200px;
+        }
+
+        .table-info {
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .table-status-available {
+            color: #28a745;
+        }
+
+        .table-status-occupied {
+            color: #dc3545;
+        }
+
+        .table-status-reserved {
+            color: #ffc107;
+        }
+
+        .table-grid {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        #tableContainer {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            padding: 10px;
+        }
+
+        .table-card {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .table-card.selected {
+            border: 3px solid #007bff;
+            transform: scale(1.05);
+        }
+
+        .table-card.available {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .table-card.occupied {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .table-card.reserved {
+            background-color: #FFC107;
+        }
+
+        .table-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .table-card h3 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+
+        .table-card p {
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+
+        .pos-content {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .table-grid {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .table-grid h2 {
+            margin: 0 0 15px 0;
+            color: #333;
+        }
+
+        #tableContainer {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            padding: 10px;
+        }
+
+        .table-card {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: #fff;
+        }
+
+        .table-card.selected {
+            border: 3px solid #007bff;
+            transform: scale(1.05);
+        }
+
+        .table-card.available {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .table-card.occupied {
+            background-color: #f44336;
+            color: white;
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .table-card.reserved {
+            background-color: #FFC107;
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .table-card:not(.occupied):not(.reserved):hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .table-card h3 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+
+        .table-card p {
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+
+        .pos-grid {
+            height: calc(100vh - 300px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>POS 시스템</h1>
+        
+        <div class="pos-content">
+            <div class="table-grid">
+                <h2>테이블 선택</h2>
+                <div id="tableContainer"></div>
+            </div>
+
+            <div class="pos-grid">
+                <div class="menu-section">
+                    <div class="menu-buttons">
+                        <button class="menu-btn" data-price="4000" onclick="addToOrder('아메리카노', 4000)">
+                            아메리카노<br>₩4,000
+                        </button>
+                        <button class="menu-btn" data-price="4000" onclick="addToOrder('아메리카', 10000)">
+                            아메리카<br>₩10,000
+                        </button>
+                        <button class="menu-btn" data-price="4000" onclick="addToOrder('노메리카', 69000)">
+                            노메리카<br>₩69,000
+                        </button>
+                        <button class="menu-btn" data-price="4000" onclick="addToOrder('노메리카노', 74000)">
+                            노메리카노<br>₩74,000
+                        </button>
+                        <!-- Add more menu buttons similarly -->
+                    </div>
+                </div>
+
+                <div class="order-summary">
+                    <button class="submit-btn" onclick="submitOrder()">주문 제출</button>
+                    <h2>주문 내역</h2>
+                    <div id="selected-items"></div>
+                    <div class="total-section">
+                        <div>총계: ₩<span id="total-amount">0</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <script>
+        const socket = io();
+        
+        let orderItems = [];
+        let selectedTable = null;
+
+        // Load tables when page loads
+        async function loadTables() {
+            try {
+                const response = await fetch('/api/tables');
+                const data = await response.json();
+                console.log('Loaded tables:', data); // Debug log
+                
+                const tableContainer = document.getElementById('tableContainer');
+                if (!tableContainer) {
+                    console.error('Table container not found!');
+                    return;
+                }
+                
+                tableContainer.innerHTML = data.tables.map(table => `
+                    <div class="table-card ${table.status} ${selectedTable?.id === table.id ? 'selected' : ''}"
+                         onclick="selectTable(${table.id})"
+                         ${table.status === 'occupied' || table.status === 'reserved' ? 'disabled' : ''}>
+                        <h3>테이블 ${table.table_number}</h3>
+                        <p>${table.capacity}인석</p>
+                        <p>${getStatusText(table.status)}</p>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('테이블 정보를 불러오는데 실패했습니다:', error);
+            }
+        }
+
+        async function selectTable(tableId) {
+            try {
+                const response = await fetch(`/api/tables/${tableId}`);
+                const data = await response.json();
+                const table = data.table;
+
+                // if (table.status === 'occupied' || table.status === 'reserved') {
+                //     alert('이미 사용 중이거나 예약된 테이블입니다.');
+                //     return;
+                // }
+
+                selectedTable = table;
+                loadTables(); // Refresh to show selection
+            } catch (error) {
+                console.error('테이블 정보를 불러오는데 실패했습니다:', error);
+            }
+        }
+
+        function getStatusText(status) {
+            const statusMap = {
+                'available': '이용 가능',
+                'occupied': '사용 중',
+                'reserved': '예약됨'
+            };
+            return statusMap[status] || status;
+        }
+
+        function addToOrder(menuName, price) {
+            orderItems.push({
+                menu: menuName,
+                price: price
+            });
+            updateOrderSummary();
+        }
+
+        function deleteItem(index) {
+            orderItems.splice(index, 1);
+            updateOrderSummary();
+        }
+
+        function updateOrderSummary() {
+            const summaryElement = document.getElementById('selected-items');
+            const totalElement = document.getElementById('total-amount');
+            
+            if (orderItems.length === 0) {
+                summaryElement.innerHTML = '<p>선택된 상품이 없습니다.</p>';
+                totalElement.textContent = '0';
+                return;
+            }
+
+            let total = 0;
+            summaryElement.innerHTML = orderItems.map((item, index) => {
+                total += item.price;
+                return `
+                    <div class="order-item">
+                        <div>
+                            <div>${item.menu}</div>
+                            <div>₩${item.price.toLocaleString()}</div>
+                        </div>
+                        <button class="delete-btn" onclick="deleteItem(${index})">×</button>
+                    </div>
+                `;
+            }).join('');
+
+            totalElement.textContent = total.toLocaleString();
+        }
+
+        async function submitOrder() {
+            if (orderItems.length === 0) {
+                alert('메뉴를 선택하세요');
+                return;
+            }
+
+            if (!selectedTable) {
+                alert('테이블을 선택하세요');
+                return;
+            }
+
+            const order = {
+                table_id: selectedTable.id,
+                items: orderItems,
+                total: orderItems.reduce((sum, item) => sum + item.price, 0),
+                status: '대기 중'
+            };
+
+            try {
+                // Update table status to occupied
+                await fetch(`/api/tables/${selectedTable.id}/status`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ status: 'occupied' })
+                });
+
+                // Submit the order
+                socket.emit('new_order', order);
+                alert('주문이 제출되었습니다.');
+                
+                // Reset order and reload tables
+                orderItems = [];
+                updateOrderSummary();
+                selectedTable = null;
+                loadTables();
+
+            } catch (error) {
+                console.error('주문 처리 중 오류가 발생했습니다:', error);
+                alert('주문 처리 중 오류가 발생했습니다.');
+            }
+        }
+
+        // Load tables on page load
+        loadTables();
+
+        // Refresh tables every 30 seconds
+        setInterval(loadTables, 30000);
+    </script>
+</body>
+</html>

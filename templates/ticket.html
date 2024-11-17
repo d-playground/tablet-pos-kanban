@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>티켓 시스템</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .kanban-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            height: calc(100vh - 150px);
+        }
+
+        .column {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .column h2 {
+            color: #333;
+            text-align: center;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #ddd;
+            margin-top: 0;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+
+        #pending button { background-color: #ff5722; }
+        #ongoing button { background-color: #2196F3; }
+        #complete button { background-color: #4CAF50; }
+
+        .table-group {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: rgba(0,0,0,0.03);
+        }
+
+        .table-group-header {
+            font-weight: bold;
+            padding: 5px 10px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid rgba(0,0,0,0.1);
+        }
+
+        .table-number {
+            font-size: 1.2em;
+            color: #007bff;
+        }
+
+        .ticket {
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .ticket:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .ticket-menu {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .ticket-quantity {
+            background-color: #007bff;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .ticket-time {
+            color: #666;
+            font-size: 0.8em;
+        }
+
+        /* Color coding for different tables */
+        .table-color-0 .ticket { border-left: 4px solid #4CAF50; }
+        .table-color-1 .ticket { border-left: 4px solid #2196F3; }
+        .table-color-2 .ticket { border-left: 4px solid #9C27B0; }
+        .table-color-3 .ticket { border-left: 4px solid #FF9800; }
+        .table-color-4 .ticket { border-left: 4px solid #E91E63; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>주문 상태 관리</h1>
+
+        <div class="kanban-board">
+            <!-- 대기 중 -->
+            <div class="column" id="pending">
+                <h2>대기 중</h2>
+            </div>
+
+            <!-- 진행 중 -->
+            <div class="column" id="ongoing">
+                <h2>진행 중</h2>
+            </div>
+
+            <!-- 완료 -->
+            <div class="column" id="complete">
+                <h2>완료</h2>
+                <button id="loadMoreBtn" onclick="loadMoreCompleted()" style="display: none;">20개 더 보기</button>
+            </div>
+        </div>
+
+        <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+        <script>
+            const socket = io.connect('http://localhost:5000');
+            const tableColors = {}; // Store color assignments for tables
+            let colorIndex = 0;
+
+            let completedOrdersOffset = 0;
+            const completedOrdersLimit = 20;
+
+            // Load existing orders when page loads
+            fetch('/api/orders')
+                .then(response => response.json())
+                .then(data => {
+                    data.orders.forEach(order => {
+                        createTicket(order);
+                    });
+                    // Show load more button if there are completed orders
+                    const completeColumn = document.getElementById('complete');
+                    if (completeColumn.querySelectorAll('.ticket').length >= completedOrdersLimit) {
+                        document.getElementById('loadMoreBtn').style.display = 'block';
+                    }
+                });
+
+            socket.on('order_update', function(order) {
+                createTicket(order);
+            });
+
+            function getTableColor(tableId) {
+                if (!tableColors[tableId]) {
+                    tableColors[tableId] = colorIndex;
+                    colorIndex = (colorIndex + 1) % 5; // 5 different colors
+                }
+                return tableColors[tableId];
+            }
+
+            function createTicket(order) {
+                if (order.status !== '완료') {
+                    // Remove existing tickets for this order (only for non-completed orders)
+                    const existingTickets = document.querySelectorAll(`[data-order-id="${order.id}"]`);
+                    existingTickets.forEach(ticket => ticket.remove());
+                }
+
+                // Get or create table group
+                const columnId = order.status === '대기 중' ? 'pending' : 
+                               order.status === '진행 중' ? 'ongoing' : 'complete';
+                const column = document.getElementById(columnId);
+                
+                let tableGroup = column.querySelector(`[data-table-id="${order.table_id}"]`);
+                if (!tableGroup) {
+                    tableGroup = document.createElement('div');
+                    tableGroup.className = `table-group table-color-${getTableColor(order.table_id)}`;
+                    tableGroup.dataset.tableId = order.table_id;
+                    
+                    const tableHeader = document.createElement('div');
+                    tableHeader.className = 'table-group-header';
+                    tableHeader.innerHTML = `
+                        <span class="table-number">테이블 ${order.table_id}</span>
+                        <span class="ticket-time">${new Date(order.created_at).toLocaleTimeString()}</span>
+                    `;
+                    tableGroup.appendChild(tableHeader);
+                    column.appendChild(tableGroup);
+                }
+
+                // Create individual tickets for each menu item
+                if (Array.isArray(order.items)) {
+                    order.items.forEach(item => {
+                        const ticket = createMenuTicket(order, item);
+                        tableGroup.appendChild(ticket);
+                    });
+                } else {
+                    const ticket = createMenuTicket(order, { menu: order.menu, quantity: order.quantity || 1 });
+                    tableGroup.appendChild(ticket);
+                }
+            }
+
+            function createMenuTicket(order, item) {
+                const ticket = document.createElement('div');
+                ticket.className = 'ticket';
+                ticket.dataset.orderId = order.id;
+                
+                ticket.innerHTML = `
+                    <div class="ticket-header">
+                        <span class="ticket-menu">${item.menu}</span>
+                        <span class="ticket-quantity">x ${item.quantity}</span>
+                    </div>
+                `;
+
+                ticket.onclick = () => {
+                    if (order.status === '대기 중') {
+                        updateOrderStatus(order, '진행 중');
+                    } else if (order.status === '진행 중') {
+                        updateOrderStatus(order, '완료');
+                    }
+                };
+
+                return ticket;
+            }
+
+            function updateOrderStatus(order, newStatus) {
+                const updatedOrder = {
+                    ...order,
+                    status: newStatus
+                };
+                socket.emit('new_order', updatedOrder);
+            }
+
+            function loadMoreCompleted() {
+                completedOrdersOffset += completedOrdersLimit;
+                fetch(`/api/orders/completed?offset=${completedOrdersOffset}&limit=${completedOrdersLimit}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        data.orders.forEach(order => {
+                            createTicket(order);
+                        });
+                        // Hide button if no more orders
+                        if (data.orders.length < completedOrdersLimit) {
+                            document.getElementById('loadMoreBtn').style.display = 'none';
+                        }
+                    });
+            }
+        </script>
+    </div>
+</body>
+</html>

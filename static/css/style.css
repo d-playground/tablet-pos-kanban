@@ -1,0 +1,231 @@
+/* Common styles */
+* {
+    box-sizing: border-box;
+    font-family: 'Arial', sans-serif;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    background-color: #121212;
+    color: #e0e0e0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: #1e1e1e;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+h1 {
+    color: #ffffff;
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+button {
+    width: 100%;
+    padding: 15px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background-color: #333;
+    color: #e0e0e0;
+}
+
+button:hover {
+    opacity: 0.9;
+    transform: translateY(-2px);
+}
+
+/* POS specific styles */
+.pos-grid {
+    display: grid;
+    grid-template-columns: 65% 35%;
+    gap: 20px;
+    height: calc(100vh - 300px);
+}
+
+.menu-section {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow-y: auto;
+    gap: 20px;
+}
+
+.menu-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.menu-btn {
+    background-color: #007bff;
+    color: white;
+    flex: 1 1 calc(50% - 10px);
+    text-align: center;
+    padding: 20px;
+    font-size: 18px;
+}
+
+.menu-btn:hover {
+    background-color: #0056b3;
+}
+
+.order-summary {
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.submit-btn {
+    background-color: #28a745;
+    color: white;
+    margin-bottom: 20px;
+}
+
+.submit-btn:hover {
+    background-color: #218838;
+}
+
+.order-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    border-bottom: 1px solid #444;
+}
+
+.delete-btn {
+    background-color: #dc3545;
+    color: white;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.delete-btn:hover {
+    background-color: #c82333;
+}
+
+/* Ticket specific styles */
+.kanban-board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    height: calc(100vh - 150px);
+}
+
+.column {
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    padding: 15px;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    overflow-y: auto;
+}
+
+.ticket {
+    background-color: #1e1e1e;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.ticket:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.7);
+}
+
+.ticket-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.ticket-menu {
+    font-weight: bold;
+    color: #e0e0e0;
+}
+
+.ticket-quantity {
+    background-color: #007bff;
+    color: white;
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 14px;
+}
+
+.table-group {
+    margin-bottom: 20px;
+}
+
+.table-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #333;
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+.table-number {
+    font-weight: bold;
+    color: #e0e0e0;
+}
+
+.ticket-time {
+    font-size: 12px;
+    color: #999;
+}
+
+/* Index page specific styles */
+.center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    gap: 20px;
+}
+
+.center button {
+    width: 200px;
+    height: 100px;
+    font-size: 24px;
+    background-color: #007bff;
+    color: white;
+}
+
+.center button:hover {
+    background-color: #0056b3;
+}
+
+/* Menu management specific styles */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 10px;
+    border: 1px solid #ddd;
+    text-align: left;
+}
+
+th {
+    background-color: #f4f4f4;
+}

@@ -3,147 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>티켓 시스템</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            font-family: 'Arial', sans-serif;
-        }
-        
-        body {
-            margin: 0;
-            padding: 20px;
-            background-color: #f0f0f0;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        h1 {
-            color: #333;
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .kanban-board {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            height: calc(100vh - 150px);
-        }
-
-        .column {
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            padding: 15px;
-            border: none;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .column h2 {
-            color: #333;
-            text-align: center;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #ddd;
-            margin-top: 0;
-        }
-
-        button {
-            width: 100%;
-            padding: 15px;
-            margin-bottom: 10px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            background-color: #4CAF50;
-            color: white;
-        }
-
-        button:hover {
-            opacity: 0.9;
-            transform: translateY(-2px);
-        }
-
-        #pending button { background-color: #ff5722; }
-        #ongoing button { background-color: #2196F3; }
-        #complete button { background-color: #4CAF50; }
-
-        .table-group {
-            margin-bottom: 20px;
-            padding: 10px;
-            border-radius: 8px;
-            background-color: rgba(0,0,0,0.03);
-        }
-
-        .table-group-header {
-            font-weight: bold;
-            padding: 5px 10px;
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid rgba(0,0,0,0.1);
-        }
-
-        .table-number {
-            font-size: 1.2em;
-            color: #007bff;
-        }
-
-        .ticket {
-            background-color: white;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .ticket:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-        }
-
-        .ticket-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .ticket-menu {
-            font-weight: bold;
-            font-size: 1.1em;
-        }
-
-        .ticket-quantity {
-            background-color: #007bff;
-            color: white;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-
-        .ticket-time {
-            color: #666;
-            font-size: 0.8em;
-        }
-
-        /* Color coding for different tables */
-        .table-color-0 .ticket { border-left: 4px solid #4CAF50; }
-        .table-color-1 .ticket { border-left: 4px solid #2196F3; }
-        .table-color-2 .ticket { border-left: 4px solid #9C27B0; }
-        .table-color-3 .ticket { border-left: 4px solid #FF9800; }
-        .table-color-4 .ticket { border-left: 4px solid #E91E63; }
-    </style>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
@@ -246,7 +106,8 @@
                 const ticket = document.createElement('div');
                 ticket.className = 'ticket';
                 ticket.dataset.orderId = order.id;
-                
+                ticket.draggable = true; // Make the ticket draggable
+
                 ticket.innerHTML = `
                     <div class="ticket-header">
                         <span class="ticket-menu">${item.menu}</span>
@@ -254,12 +115,8 @@
                     </div>
                 `;
 
-                ticket.onclick = () => {
-                    if (order.status === '대기 중') {
-                        updateOrderStatus(order, '진행 중');
-                    } else if (order.status === '진행 중') {
-                        updateOrderStatus(order, '완료');
-                    }
+                ticket.ondragstart = (event) => {
+                    event.dataTransfer.setData('text/plain', order.id);
                 };
 
                 return ticket;
@@ -287,6 +144,31 @@
                         }
                     });
             }
+
+            document.querySelectorAll('.column').forEach(column => {
+                column.ondragover = (event) => {
+                    event.preventDefault(); // Allow drop
+                };
+
+                column.ondrop = (event) => {
+                    event.preventDefault();
+                    const orderId = event.dataTransfer.getData('text/plain');
+                    const orderElement = document.querySelector(`[data-order-id="${orderId}"]`);
+                    const newStatus = column.id === 'pending' ? '대기 중' : 
+                                      column.id === 'ongoing' ? '진행 중' : '완료';
+
+                    if (orderElement) {
+                        const order = {
+                            id: orderId,
+                            status: newStatus,
+                            table_id: orderElement.closest('.table-group').dataset.tableId,
+                            items: [{ menu: orderElement.querySelector('.ticket-menu').textContent, quantity: parseInt(orderElement.querySelector('.ticket-quantity').textContent.split('x ')[1]) }]
+                        };
+                        updateOrderStatus(order, newStatus);
+                        column.appendChild(orderElement);
+                    }
+                };
+            });
         </script>
     </div>
 </body>

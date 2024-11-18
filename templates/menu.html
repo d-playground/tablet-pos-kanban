@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>메뉴 관리</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>메뉴 관리</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>이름</th>
+                    <th>가격</th>
+                    <th>카테고리</th>
+                    <th>작업</th>
+                </tr>
+            </thead>
+            <tbody id="menu-table">
+                {% for menu in menus %}
+                <tr data-id="{{ menu.id }}">
+                    <td contenteditable="true">{{ menu.name }}</td>
+                    <td><input type="number" value="{{ menu.price }}" /></td>
+                    <td>
+                        <select>
+                            <option value="drink" {% if menu.category == 'drink' %}selected{% endif %}>Drink</option>
+                            <option value="food" {% if menu.category == 'food' %}selected{% endif %}>Food</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button onclick="deleteMenuItem({{ menu.id }})">삭제</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <button onclick="addMenuItem()">메뉴 추가</button>
+        <button onclick="saveChanges()">변경 사항 저장</button>
+    </div>
+
+    <script>
+        function addMenuItem() {
+            const table = document.getElementById('menu-table');
+            const newRow = table.insertRow();
+            newRow.innerHTML = `
+                <td contenteditable="true"></td>
+                <td><input type="number" /></td>
+                <td>
+                    <select>
+                        <option value="drink">Drink</option>
+                        <option value="food">Food</option>
+                    </select>
+                </td>
+                <td><button onclick="deleteMenuItem(null, this)">삭제</button></td>
+            `;
+        }
+
+        function deleteMenuItem(id, button) {
+            if (id) {
+                fetch(`/api/menu/${id}`, { method: 'DELETE' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            button.closest('tr').remove();
+                        } else {
+                            alert('삭제 중 오류가 발생했습니다: ' + data.error);
+                        }
+                    });
+            } else {
+                button.closest('tr').remove();
+            }
+        }
+
+        function saveChanges() {
+            const rows = document.querySelectorAll('#menu-table tr');
+            rows.forEach(row => {
+                const id = row.dataset.id;
+                const name = row.cells[0].textContent.trim();
+                const price = parseFloat(row.cells[1].querySelector('input').value.trim());
+                const category = row.cells[2].querySelector('select').value;
+
+                if (!name || isNaN(price) || !['drink', 'food'].includes(category)) {
+                    alert('데이터 형식이 잘못되었습니다.');
+                    return;
+                }
+
+                const data = { name, price, category };
+
+                if (id) {
+                    fetch(`/api/menu/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    }).then(response => response.json())
+                      .then(data => {
+                          if (!data.success) {
+                              alert('저장 중 오류가 발생했습니다: ' + data.error);
+                          }
+                      });
+                } else {
+                    fetch('/api/menu', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    }).then(response => response.json())
+                      .then(data => {
+                          if (!data.success) {
+                              alert('저장 중 오류가 발생했습니다: ' + data.error);
+                          }
+                      });
+                }
+            });
+        }
+    </script>
+</body>
+</html> 

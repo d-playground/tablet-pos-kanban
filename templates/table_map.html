@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>테이블 맵 관리</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>테이블 맵 관리</h1>
+        <div id="table-map">
+            <!-- Table map will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <script>
+        // Fetch tables and render them on the map
+        async function fetchAndRenderTableMap() {
+            try {
+                const response = await fetch('/api/tables');
+                const tables = await response.json();
+                const tableMapContainer = document.getElementById('table-map');
+                tables.forEach(table => {
+                    const div = document.createElement('div');
+                    div.className = 'table-map-item';
+                    div.innerHTML = `테이블 ${table.number}`;
+                    tableMapContainer.appendChild(div);
+                });
+            } catch (error) {
+                console.error('테이블 맵 데이터를 가져오는 중 오류가 발생했습니다:', error);
+            }
+        }
+
+        // Fetch and render table map on page load
+        fetchAndRenderTableMap();
+    </script>
+</body>
+</html> 

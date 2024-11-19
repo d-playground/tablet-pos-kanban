@@ -9,36 +9,33 @@
 <body>
     <div class="container">
         <h1>POS 시스템</h1>
-        <div class="pos-grid">
-            <div>
-                <div class="category-section">
-                    <h2>카테고리</h2>
-                    <div class="category-buttons" id="category-buttons">
-                        <!-- Category buttons will be dynamically inserted here -->
-                    </div>
-                </div>
-                <div class="menu-section">
-                    <h2>메뉴</h2>
-                    <div class="menu-buttons" id="menu-buttons">
-                        <!-- Menu buttons will be dynamically inserted here -->
-                    </div>
+        <div id="table-map" class="table-map">
+            <h2>테이블 선택</h2>
+            <div id="table-buttons">
+                <!-- Table buttons will be dynamically inserted here -->
+            </div>
+        </div>
+        <div id="pos-interface" class="pos-interface" style="display: none;">
+            <div class="category-section">
+                <h2>카테고리</h2>
+                <div class="category-buttons" id="category-buttons">
+                    <!-- Category buttons will be dynamically inserted here -->
                 </div>
             </div>
-            <div>
-                <div class="table-selection">
-                    <h2>테이블 선택</h2>
-                    <div id="table-buttons">
-                        <!-- Table buttons will be dynamically inserted here -->
-                    </div>
+            <div class="menu-section">
+                <h2>메뉴</h2>
+                <div class="menu-buttons" id="menu-buttons">
+                    <!-- Menu buttons will be dynamically inserted here -->
                 </div>
-                <div class="order-summary">
-                    <button class="submit-btn" onclick="submitOrder()">주문 제출</button>
-                    <h2>주문 내역</h2>
-                    <div id="selected-items"></div>
-                    <div class="total-section">
-                        <div>총계: ₩<span id="total-amount">0</span></div>
-                    </div>
+            </div>
+            <div class="order-summary">
+                <h2>주문 내역</h2>
+                <div id="selected-items"></div>
+                <div class="total-section">
+                    <div>총계: ₩<span id="total-amount">0</span></div>
                 </div>
+                <button class="submit-btn" onclick="submitOrder()">주문 제출</button>
+                <button class="pay-btn" onclick="payOrder()">결제</button>
             </div>
         </div>
     </div>
@@ -48,6 +45,37 @@
         const socket = io();
         let orderItems = [];
         let selectedTable = null;
+
+        // Fetch tables from the server
+        async function fetchTables() {
+            try {
+                const response = await fetch('/api/tables');
+                const tables = await response.json();
+                renderTableButtons(tables);
+            } catch (error) {
+                console.error('테이블 데이터를 가져오는 중 오류가 발생했습니다:', error);
+            }
+        }
+
+        // Render table buttons
+        function renderTableButtons(tables) {
+            const tableButtonsContainer = document.getElementById('table-buttons');
+            tables.forEach(table => {
+                const button = document.createElement('button');
+                button.className = 'table-btn';
+                button.onclick = () => selectTable(table.id);
+                button.innerHTML = `테이블 ${table.number}`;
+                tableButtonsContainer.appendChild(button);
+            });
+        }
+
+        // Select a table and show POS interface
+        function selectTable(tableId) {
+            selectedTable = tableId;
+            document.getElementById('table-map').style.display = 'none';
+            document.getElementById('pos-interface').style.display = 'block';
+            fetchCategoriesAndMenus();
+        }
 
         // Fetch categories and menus from the server
         async function fetchCategoriesAndMenus() {
@@ -63,6 +91,7 @@
         // Render category buttons
         function renderCategoryButtons(categories) {
             const categoryButtonsContainer = document.getElementById('category-buttons');
+            categoryButtonsContainer.innerHTML = ''; // Clear previous categories
             categories.forEach(category => {
                 const button = document.createElement('button');
                 button.className = 'category-btn';
@@ -96,29 +125,6 @@
                 button.innerHTML = `${menu.name}<br>₩${menu.price.toLocaleString()}`;
                 menuButtonsContainer.appendChild(button);
             });
-        }
-
-        // Render table buttons
-        function renderTableButtons(tables) {
-            const tableButtonsContainer = document.getElementById('table-buttons');
-            tables.forEach(table => {
-                const button = document.createElement('button');
-                button.className = 'table-btn';
-                button.onclick = () => selectedTable = table.id;
-                button.innerHTML = `테이블 ${table.number}`;
-                tableButtonsContainer.appendChild(button);
-            });
-        }
-
-        // Fetch tables from the server
-        async function fetchTables() {
-            try {
-                const response = await fetch('/api/tables');
-                const tables = await response.json();
-                renderTableButtons(tables);
-            } catch (error) {
-                console.error('테이블 데이터를 가져오는 중 오류가 발생했습니다:', error);
-            }
         }
 
         function addToOrder(menuName, price, category) {
@@ -158,8 +164,17 @@
             }
         }
 
-        // Fetch and render categories and tables on page load
-        fetchCategoriesAndMenus();
+        function payOrder() {
+            if (orderItems.length === 0) {
+                alert('결제할 주문이 없습니다.');
+                return;
+            }
+            alert('결제가 완료되었습니다.');
+            orderItems = [];
+            updateOrderSummary();
+        }
+
+        // Fetch and render tables on page load
         fetchTables();
     </script>
 </body>

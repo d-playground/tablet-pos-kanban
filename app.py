@@ -226,5 +226,52 @@ def get_tables():
             tables = cursor.fetchall()
     return jsonify(tables)
 
+@app.route('/api/orders', methods=['POST'])
+def create_order():
+    data = request.json
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            try:
+                for item in data['items']:
+                    cursor.execute('''
+                        INSERT INTO orders (table_id, menu, quantity, status, category, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    ''', (data['table_id'], item['menu'], item['quantity'], data['status'], item['category'], current_time))
+                conn.commit()
+                return jsonify({'success': True})
+            except Exception as e:
+                print(f"Error creating order: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/orders/<int:order_id>', methods=['PUT'])
+def edit_order(order_id):
+    data = request.json
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute('''
+                    UPDATE orders
+                    SET table_id = %s, menu = %s, quantity = %s, status = %s, category = %s
+                    WHERE id = %s
+                ''', (data['table_id'], data['menu'], data['quantity'], data['status'], data['category'], order_id))
+                conn.commit()
+                return jsonify({'success': True})
+            except Exception as e:
+                print(f"Error editing order: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/orders/<int:order_id>', methods=['DELETE'])
+def delete_order(order_id):
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute('DELETE FROM orders WHERE id = %s', (order_id,))
+                conn.commit()
+                return jsonify({'success': True})
+            except Exception as e:
+                print(f"Error deleting order: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)

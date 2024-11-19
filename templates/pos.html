@@ -112,6 +112,41 @@
             }
         }
 
+        async function editOrder(orderId, updatedData) {
+            try {
+                const response = await fetch(`/api/orders/${orderId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updatedData)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('Order updated successfully.');
+                } else {
+                    alert('Error updating order: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error updating order:', error);
+            }
+        }
+        async function deleteOrder(orderId) {
+            try {
+                const response = await fetch(`/api/orders/${orderId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('Order deleted successfully.');
+                } else {
+                    alert('Error deleting order: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error deleting order:', error);
+            }
+        }
+
         // Render menu buttons
         function renderMenuButtons(menus) {
             const menuButtonsContainer = document.getElementById('menu-buttons');

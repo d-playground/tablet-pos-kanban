@@ -41,33 +41,54 @@
         <div class="column" id="finished-orders"><h2>완료됨</h2></div>
     </div>
 
-    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <!-- Include Sortable.js -->
     <script src="//cdnjs.cloudflare.com/ajax/libs/Sortable/1.14.0/Sortable.min.js"></script>
     <script>
-        const socket = io();
         const pendingOrders = document.getElementById('pending-orders');
         const ongoingOrdersBar1 = document.getElementById('ongoing-orders-bar1');
         const finishedOrders = document.getElementById('finished-orders');
 
-        new Sortable(pendingOrders, { group: 'shared', animation: 150 });
-        new Sortable(ongoingOrdersBar1, { group: 'shared', animation: 150 });
-        new Sortable(finishedOrders, { group: 'shared', animation: 150 });
-
-        socket.on('order_update', (order) => {
-            order.items.forEach(item => {
-                if (item.category === '음료') {
-                    const orderElement = renderOrder(item);
-                    addClickListener(orderElement, order.status);
-                    if (order.status === '대기 중') {
-                        pendingOrders.appendChild(orderElement);
-                    } else if (order.status === '진행 중') {
-                        ongoingOrdersBar1.appendChild(orderElement);
-                    } else if (order.status === '완료됨') {
-                        finishedOrders.appendChild(orderElement);
-                    }
-                }
-            });
+        // Initialize Sortable.js with event listeners
+        const pendingSortable = new Sortable(pendingOrders, {
+            group: 'shared',
+            animation: 150,
+            onEnd: updateOrderStatus
         });
+        const ongoingSortable = new Sortable(ongoingOrdersBar1, {
+            group: 'shared',
+            animation: 150,
+            onEnd: updateOrderStatus
+        });
+        const finishedSortable = new Sortable(finishedOrders, {
+            group: 'shared',
+            animation: 150,
+            onEnd: updateOrderStatus
+        });
+
+        // WebSocket setup
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+        ws.onopen = function(event) {
+            console.log('WebSocket connection opened');
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            const action = data.action;
+            if (action === 'order_update') {
+                handleOrderUpdate(data.order);
+            } else if (action === 'status_update') {
+                updateOrderElementStatus(data.orderId, data.status);
+            }
+        };
+
+        ws.onclose = function(event) {
+            console.log('WebSocket connection closed');
+        };
+
+        ws.onerror = function(event) {
+            console.error('WebSocket error observed:', event);
+        };
 
         function fetchOrders() {
             fetch('/api/orders/음료')
@@ -75,73 +96,92 @@
                 .then(data => {
                     data.orders.forEach(order => {
                         const orderElement = renderOrder(order);
-                        addClickListener(orderElement, order.status);
-                        if (order.status === '대기 중') {
-                            pendingOrders.appendChild(orderElement);
-                        } else if (order.status === '진행 중') {
-                            ongoingOrdersBar1.appendChild(orderElement);
-                        } else if (order.status === '완료됨') {
-                            finishedOrders.appendChild(orderElement);
-                        }
+                        addOrderToColumn(orderElement, order.status);
                     });
                 });
+        }
+
+        function handleOrderUpdate(order) {
+            order.items.forEach(item => {
+                if (item.category === '음료') {
+                    const orderElement = renderOrder({
+                        id: order.id,
+                        menu: item.menu,
+                        quantity: item.quantity,
+                        status: order.status,
+                        created_at: order.created_at
+                    });
+                    addOrderToColumn(orderElement, order.status);
+                }
+            });
         }
 
         function renderOrder(order) {
             const orderElement = document.createElement('div');
             orderElement.className = 'ticket';
-            orderElement.innerHTML = `<div class="ticket-header"><span class="ticket-menu">${order.menu}</span><span class="ticket-quantity">${order.quantity}</span></div><div class="ticket-time">${order.created_at}</div>`;
+            orderElement.dataset.orderId = order.id;
+            orderElement.dataset.status = order.status;
+            orderElement.innerHTML = `
+                <div class="ticket-header">
+                    <span class="ticket-menu">${order.menu}</span>
+                    <span class="ticket-quantity">${order.quantity}</span>
+                </div>
+                <div class="ticket-time">${order.created_at}</div>`;
             return orderElement;
         }
 
-        function addClickListener(orderElement, currentStatus) {
-            orderElement.addEventListener('click', () => {
-                if (currentStatus === '대기 중') {
-                    ongoingOrdersBar1.appendChild(orderElement);
-                    currentStatus = '진행 중';
-                } else if (currentStatus === '진행 중') {
-                    finishedOrders.appendChild(orderElement);
-                    currentStatus = '완료됨';
+        function addOrderToColumn(orderElement, status) {
+            if (status === '대기 중') {
+                pendingOrders.appendChild(orderElement);
+            } else if (status === '진행 중') {
+                ongoingOrdersBar1.appendChild(orderElement);
+            } else if (status === '완료됨') {
+                finishedOrders.appendChild(orderElement);
+            }
+        }
+
+        function updateOrderStatus(evt) {
+            const orderElement = evt.item;
+            const newStatus = getColumnStatus(evt.to.id);
+            const orderId = orderElement.dataset.orderId;
+
+            // Update the order status on the server
+            ws.send(JSON.stringify({
+                action: 'change_status',
+                orderId: orderId,
+                status: newStatus
+            }));
+
+            // Update the order element's data-status
+            orderElement.dataset.status = newStatus;
+        }
+
+        function getColumnStatus(columnId) {
+            if (columnId === 'pending-orders') {
+                return '대기 중';
+            } else if (columnId === 'ongoing-orders-bar1') {
+                return '진행 중';
+            } else if (columnId === 'finished-orders') {
+                return '완료됨';
+            }
+        }
+
+        function updateOrderElementStatus(orderId, status) {
+            const orderElements = document.querySelectorAll(`[data-order-id='${orderId}']`);
+            orderElements.forEach(orderElement => {
+                // Remove from current column
+                if (orderElement.parentNode) {
+                    orderElement.parentNode.removeChild(orderElement);
                 }
+                // Update data-status
+                orderElement.dataset.status = status;
+                // Add to new column
+                addOrderToColumn(orderElement, status);
             });
         }
 
-        async function editOrder(orderId, updatedData) {
-            try {
-                const response = await fetch(`/api/orders/${orderId}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(updatedData)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    alert('Order updated successfully.');
-                } else {
-                    alert('Error updating order: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error updating order:', error);
-            }
-        }
-        async function deleteOrder(orderId) {
-            try {
-                const response = await fetch(`/api/orders/${orderId}`, {
-                    method: 'DELETE'
-                });
-                const result = await response.json();
-                if (result.success) {
-                    alert('Order deleted successfully.');
-                } else {
-                    alert('Error deleting order: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error deleting order:', error);
-            }
-        }
-
+        // Fetch initial orders
         fetchOrders();
     </script>
 </body>
-</html> 
+</html>

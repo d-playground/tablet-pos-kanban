@@ -40,11 +40,35 @@
         </div>
     </div>
 
-    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
     <script>
-        const socket = io();
         let orderItems = [];
         let selectedTable = null;
+
+        // WebSocket setup
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+        ws.onopen = function(event) {
+            console.log('WebSocket connection opened');
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            const action = data.action;
+            if (action === 'order_update') {
+                console.log('Order update received:', data.order);
+                // Handle order updates if necessary
+            } else if (action === 'test_response') {
+                console.log(data.message);
+            }
+        };
+
+        ws.onclose = function(event) {
+            console.log('WebSocket connection closed');
+        };
+
+        ws.onerror = function(event) {
+            console.error('WebSocket error observed:', event);
+        };
 
         // Fetch tables from the server
         async function fetchTables() {
@@ -112,41 +136,6 @@
             }
         }
 
-        async function editOrder(orderId, updatedData) {
-            try {
-                const response = await fetch(`/api/orders/${orderId}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(updatedData)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    alert('Order updated successfully.');
-                } else {
-                    alert('Error updating order: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error updating order:', error);
-            }
-        }
-        async function deleteOrder(orderId) {
-            try {
-                const response = await fetch(`/api/orders/${orderId}`, {
-                    method: 'DELETE'
-                });
-                const result = await response.json();
-                if (result.success) {
-                    alert('Order deleted successfully.');
-                } else {
-                    alert('Error deleting order: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error deleting order:', error);
-            }
-        }
-
         // Render menu buttons
         function renderMenuButtons(menus) {
             const menuButtonsContainer = document.getElementById('menu-buttons');
@@ -157,13 +146,13 @@
                 button.dataset.price = menu.price;
                 button.dataset.category = menu.category;
                 button.onclick = () => addToOrder(menu.name, menu.price, menu.category);
-                button.innerHTML = `${menu.name}<br>₩${menu.price.toLocaleString()}`;
+                button.innerHTML = `${menu.name}<br>₩${parseInt(menu.price).toLocaleString()}`;
                 menuButtonsContainer.appendChild(button);
             });
         }
 
         function addToOrder(menuName, price, category) {
-            orderItems.push({ menu: menuName, price: price, category: category });
+            orderItems.push({ menu: menuName, price: parseFloat(price), category: category });
             updateOrderSummary();
         }
 
@@ -187,12 +176,23 @@
                 alert('테이블을 선택하세요');
                 return;
             }
-            const order = { items: orderItems, total: orderItems.reduce((sum, item) => sum + item.price, 0), table: selectedTable, status: '대기 중' };
+            const order = { items: orderItems, total: orderItems.reduce((sum, item) => sum + item.price, 0), table_id: selectedTable, status: '대기 중' };
             try {
-                socket.emit('new_order', order);
-                alert('주문이 제출되었습니다.');
-                orderItems = [];
-                updateOrderSummary();
+                const response = await fetch('/api/orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(order)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('주문이 제출되었습니다.');
+                    orderItems = [];
+                    updateOrderSummary();
+                } else {
+                    alert('주문 제출 중 오류가 발생했습니다: ' + result.error);
+                }
             } catch (error) {
                 console.error('주문 처리 중 오류가 발생했습니다:', error);
                 alert('주문 처리 중 오류가 발생했습니다.');

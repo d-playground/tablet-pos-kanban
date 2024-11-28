@@ -45,25 +45,19 @@
     <script src="//cdnjs.cloudflare.com/ajax/libs/Sortable/1.14.0/Sortable.min.js"></script>
     <script>
         const pendingOrders = document.getElementById('pending-orders');
-        const ongoingOrdersBar1 = document.getElementById('ongoing-orders-bar1');
+        const ongoingSortable = document.getElementById('ongoing-orders-bar1');
         const finishedOrders = document.getElementById('finished-orders');
 
         // Initialize Sortable.js with event listeners
-        const pendingSortable = new Sortable(pendingOrders, {
+        const sortableOptions = {
             group: 'shared',
             animation: 150,
             onEnd: updateOrderStatus
-        });
-        const ongoingSortable = new Sortable(ongoingOrdersBar1, {
-            group: 'shared',
-            animation: 150,
-            onEnd: updateOrderStatus
-        });
-        const finishedSortable = new Sortable(finishedOrders, {
-            group: 'shared',
-            animation: 150,
-            onEnd: updateOrderStatus
-        });
+        };
+
+        new Sortable(pendingOrders, sortableOptions);
+        new Sortable(ongoingSortable, sortableOptions);
+        new Sortable(finishedOrders, sortableOptions);
 
         // WebSocket setup
         const ws = new WebSocket(`ws://${window.location.host}/ws`);
@@ -75,6 +69,8 @@
         ws.onmessage = function(event) {
             const data = JSON.parse(event.data);
             const action = data.action;
+            console.log("WebSocket message received:", data);
+
             if (action === 'order_update') {
                 handleOrderUpdate(data.order);
             } else if (action === 'status_update') {
@@ -90,32 +86,38 @@
             console.error('WebSocket error observed:', event);
         };
 
+        // Fetch and render initial orders
         function fetchOrders() {
-            fetch('/api/orders/음료')
+            fetch('/api/orders/음료') // Assuming '음료' is the category for Bar1
                 .then(response => response.json())
                 .then(data => {
                     data.orders.forEach(order => {
                         const orderElement = renderOrder(order);
                         addOrderToColumn(orderElement, order.status);
                     });
+                })
+                .catch(error => {
+                    console.error('주문 데이터를 가져오는 중 오류가 발생했습니다:', error);
                 });
         }
 
-        function handleOrderUpdate(order) {
-            order.items.forEach(item => {
-                if (item.category === '음료') {
+        // Handle incoming order updates
+        function handleOrderUpdate(orderItems) {
+            orderItems.forEach(item => {
+                if (item.category === '음료') { // Ensure this is relevant to Bar1
                     const orderElement = renderOrder({
-                        id: order.id,
+                        id: item.id,
                         menu: item.menu,
                         quantity: item.quantity,
-                        status: order.status,
-                        created_at: order.created_at
+                        status: item.status,
+                        created_at: item.created_at
                     });
-                    addOrderToColumn(orderElement, order.status);
+                    addOrderToColumn(orderElement, item.status);
                 }
             });
         }
 
+        // Render individual order as a ticket
         function renderOrder(order) {
             const orderElement = document.createElement('div');
             orderElement.className = 'ticket';
@@ -124,28 +126,30 @@
             orderElement.innerHTML = `
                 <div class="ticket-header">
                     <span class="ticket-menu">${order.menu}</span>
-                    <span class="ticket-quantity">${order.quantity}</span>
+                    <span class="ticket-quantity">x${order.quantity}</span>
                 </div>
                 <div class="ticket-time">${order.created_at}</div>`;
             return orderElement;
         }
 
+        // Add order to the appropriate column based on status
         function addOrderToColumn(orderElement, status) {
             if (status === '대기 중') {
                 pendingOrders.appendChild(orderElement);
             } else if (status === '진행 중') {
-                ongoingOrdersBar1.appendChild(orderElement);
+                ongoingSortable.appendChild(orderElement);
             } else if (status === '완료됨') {
                 finishedOrders.appendChild(orderElement);
             }
         }
 
+        // Update order status when dragged and dropped
         function updateOrderStatus(evt) {
             const orderElement = evt.item;
             const newStatus = getColumnStatus(evt.to.id);
             const orderId = orderElement.dataset.orderId;
 
-            // Update the order status on the server
+            // Update the order status on the server via WebSocket
             ws.send(JSON.stringify({
                 action: 'change_status',
                 orderId: orderId,
@@ -156,6 +160,7 @@
             orderElement.dataset.status = newStatus;
         }
 
+        // Determine status based on column ID
         function getColumnStatus(columnId) {
             if (columnId === 'pending-orders') {
                 return '대기 중';
@@ -166,6 +171,7 @@
             }
         }
 
+        // Update order element's position based on status update from server
         function updateOrderElementStatus(orderId, status) {
             const orderElements = document.querySelectorAll(`[data-order-id='${orderId}']`);
             orderElements.forEach(orderElement => {
@@ -180,8 +186,8 @@
             });
         }
 
-        // Fetch initial orders
-        fetchOrders();
+        // Fetch initial orders on page load
+        document.addEventListener('DOMContentLoaded', fetchOrders);
     </script>
 </body>
 </html>

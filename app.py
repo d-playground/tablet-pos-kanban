@@ -198,18 +198,18 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_json()
             action = data.get('action')
             if action == 'change_status':
-                await handle_change_status(data)
+                await handle_change_status(data, websocket)
             elif action == 'test_event':
-                await handle_test_event(data)
+                await handle_test_event(data, websocket)
             # You can handle more actions here
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-async def handle_change_status(data):
+async def handle_change_status(data: dict, websocket: WebSocket):
     order_id = data.get('orderId')
     new_status = data.get('status')
     if not order_id or not new_status:
-        await manager.send_personal_message({'success': False, 'error': 'Invalid data.'}, websocket=None)
+        await manager.send_personal_message({'success': False, 'error': 'Invalid data.'}, websocket)
         return
 
     with get_db() as conn:
@@ -221,7 +221,7 @@ async def handle_change_status(data):
                     WHERE id = %s
                 ''', (new_status, order_id))
                 if cursor.rowcount == 0:
-                    await manager.send_personal_message({'success': False, 'error': 'Order not found.'}, websocket=None)
+                    await manager.send_personal_message({'success': False, 'error': 'Order not found.'}, websocket)
                     return
                 conn.commit()
                 # Broadcast status update to all clients
@@ -232,11 +232,11 @@ async def handle_change_status(data):
                 })
             except Exception as e:
                 print(f"Error updating order status: {e}")
-                await manager.send_personal_message({'success': False, 'error': str(e)}, websocket=None)
+                await manager.send_personal_message({'success': False, 'error': str(e)}, websocket)
 
-async def handle_test_event(data):
+async def handle_test_event(data: dict, websocket: WebSocket):
     print('Test event received:', data)
-    await manager.broadcast({'action': 'test_response', 'message': 'Hello, client!'})
+    await manager.send_personal_message({'action': 'test_response', 'message': 'Hello, client!'}, websocket)
 
 @app.get('/api/orders/{category}')
 async def get_orders_by_category(category: str):

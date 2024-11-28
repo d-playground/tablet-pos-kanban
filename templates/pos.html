@@ -54,9 +54,15 @@
         ws.onmessage = function(event) {
             const data = JSON.parse(event.data);
             const action = data.action;
+            console.log("WebSocket message received:", data);
+
             if (action === 'order_update') {
                 console.log('Order update received:', data.order);
-                // Handle order updates if necessary
+                // Optionally, handle order updates if necessary
+            } else if (action === 'status_update') {
+                // Handle status updates if needed
+                console.log(`Order ${data.orderId} status updated to ${data.status}`);
+                // You can implement UI updates based on status changes here
             } else if (action === 'test_response') {
                 console.log(data.message);
             }
@@ -151,22 +157,28 @@
             });
         }
 
+        // Add item to order
         function addToOrder(menuName, price, category) {
             orderItems.push({ menu: menuName, price: parseFloat(price), category: category });
             updateOrderSummary();
         }
 
+        // Update order summary
         function updateOrderSummary() {
             const summaryElement = document.getElementById('selected-items');
             const totalElement = document.getElementById('total-amount');
             let total = 0;
             summaryElement.innerHTML = orderItems.map((item, index) => {
                 total += item.price;
-                return `<div class="order-item"><div>${item.menu}</div><div>₩${item.price.toLocaleString()}</div></div>`;
+                return `<div class="order-item">
+                            <div>${item.menu}</div>
+                            <div>₩${item.price.toLocaleString()}</div>
+                        </div>`;
             }).join('');
             totalElement.textContent = total.toLocaleString();
         }
 
+        // Submit order to the server
         async function submitOrder() {
             if (orderItems.length === 0) {
                 alert('메뉴를 선택하세요');
@@ -176,7 +188,14 @@
                 alert('테이블을 선택하세요');
                 return;
             }
-            const order = { items: orderItems, total: orderItems.reduce((sum, item) => sum + item.price, 0), table_id: selectedTable, status: '대기 중' };
+            const order = { 
+                items: orderItems.map(item => ({
+                    menu: item.menu,
+                    quantity: 1, // Assuming quantity as 1, modify if needed
+                })), 
+                table_id: selectedTable, 
+                status: '대기 중' 
+            };
             try {
                 const response = await fetch('/api/orders', {
                     method: 'POST',
@@ -190,6 +209,8 @@
                     alert('주문이 제출되었습니다.');
                     orderItems = [];
                     updateOrderSummary();
+                    // Optionally, notify the server via WebSocket
+                    // ws.send(JSON.stringify({ action: 'order_submitted', order: result.order }));
                 } else {
                     alert('주문 제출 중 오류가 발생했습니다: ' + result.error);
                 }
@@ -199,6 +220,7 @@
             }
         }
 
+        // Handle payment
         function payOrder() {
             if (orderItems.length === 0) {
                 alert('결제할 주문이 없습니다.');
@@ -207,6 +229,7 @@
             alert('결제가 완료되었습니다.');
             orderItems = [];
             updateOrderSummary();
+            // Optionally, notify the server about payment
         }
 
         // Fetch and render tables on page load

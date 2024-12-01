@@ -1,0 +1,285 @@
+<!-- order.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Order Entry</title>
+    <!-- Bootstrap CSS -->
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+    />
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background-color: #f8f9fa;
+            touch-action: manipulation;
+        }
+        .category-btn {
+            margin: 5px;
+        }
+        .menu-item {
+            margin: 5px;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .menu-item:hover {
+            background-color: #e9ecef;
+            cursor: pointer;
+        }
+        .menu-item img {
+            max-width: 100%;
+            height: auto;
+        }
+        .order-summary {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #343a40;
+            color: #fff;
+            padding: 10px;
+        }
+        .order-summary .total {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        .btn-submit {
+            margin-top: 10px;
+        }
+        .table-btn {
+            margin: 5px;
+            padding: 15px;
+            font-size: 1.2em;
+        }
+        .selected {
+            border: 2px solid #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1 class="my-3 text-center">Order Entry</h1>
+        <!-- Table Selection -->
+        <div class="row mb-3">
+            <div class="col">
+                <h3>Select Table:</h3>
+                <div id="table-list" class="d-flex flex-wrap">
+                    <!-- Table buttons will be loaded here -->
+                </div>
+            </div>
+        </div>
+        <!-- Category Selection -->
+        <div class="row mb-3">
+            <div class="col">
+                <h3>Select Category:</h3>
+                <div id="category-list" class="d-flex flex-wrap">
+                    <!-- Category buttons will be loaded here -->
+                </div>
+            </div>
+        </div>
+        <!-- Menu Items -->
+        <div class="row">
+            <div class="col">
+                <h3>Menu Items:</h3>
+                <div id="menu-list" class="d-flex flex-wrap">
+                    <!-- Menu items will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Order Summary -->
+    <div class="order-summary">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h4>Order Summary</h4>
+                <div id="order-items">
+                    <!-- Order items will be listed here -->
+                </div>
+            </div>
+            <div class="text-right">
+                <div class="total">Total: $<span id="order-total">0.00</span></div>
+                <button id="submit-order" class="btn btn-success btn-lg btn-submit">Submit Order</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap and jQuery JS -->
+    <script
+      src="https://code.jquery.com/jquery-3.5.1.min.js"
+    ></script>
+    <script
+      src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.bundle.min.js"
+    ></script>
+    <!-- Custom JS -->
+    <script>
+        $(document).ready(function() {
+            let selectedTable = null;
+            let selectedCategory = null;
+            let menus = [];
+            let orderItems = [];
+
+            function loadTables() {
+                $.getJSON('/api/tables', function(data) {
+                    let tableList = $('#table-list');
+                    tableList.empty();
+                    data.forEach(function(table) {
+                        let btn = $('<button>')
+                            .addClass('btn btn-outline-primary table-btn')
+                            .text(table.name)
+                            .data('table-id', table.id)
+                            .on('click', function() {
+                                $('.table-btn').removeClass('selected');
+                                $(this).addClass('selected');
+                                selectedTable = $(this).data('table-id');
+                            });
+                        tableList.append(btn);
+                    });
+                });
+            }
+
+            function loadCategories() {
+                $.getJSON('/api/categories', function(data) {
+                    let categoryList = $('#category-list');
+                    categoryList.empty();
+                    data.forEach(function(category) {
+                        let btn = $('<button>')
+                            .addClass('btn btn-outline-secondary category-btn')
+                            .text(category.name)
+                            .data('category-id', category.id)
+                            .on('click', function() {
+                                $('.category-btn').removeClass('selected');
+                                $(this).addClass('selected');
+                                selectedCategory = $(this).data('category-id');
+                                loadMenus();
+                            });
+                        categoryList.append(btn);
+                    });
+                });
+            }
+
+            function loadMenus() {
+                let url = '/api/menus';
+                if (selectedCategory) {
+                    url += '?category_id=' + selectedCategory;
+                }
+                $.getJSON(url, function(data) {
+                    menus = data;
+                    let menuList = $('#menu-list');
+                    menuList.empty();
+                    data.forEach(function(menu) {
+                        let item = $('<div>')
+                            .addClass('menu-item col-6 col-md-3')
+                            .data('menu-id', menu.id)
+                            .data('menu-name', menu.name)
+                            .data('menu-price', menu.price)
+                            .on('click', function() {
+                                addToOrder($(this).data('menu-id'));
+                            });
+
+                        let itemContent = `
+                            <h5>${menu.name}</h5>
+                            <p>$${parseFloat(menu.price).toFixed(2)}</p>
+                        `;
+                        item.html(itemContent);
+                        menuList.append(item);
+                    });
+                });
+            }
+
+            function addToOrder(menuId) {
+                let menu = menus.find(m => m.id == menuId);
+                let orderItem = orderItems.find(item => item.menuId == menuId);
+                if (orderItem) {
+                    orderItem.quantity += 1;
+                } else {
+                    orderItems.push({
+                        menuId: menuId,
+                        name: menu.name,
+                        price: parseFloat(menu.price),
+                        quantity: 1
+                    });
+                }
+                updateOrderSummary();
+            }
+
+            function updateOrderSummary() {
+                let orderItemsDiv = $('#order-items');
+                orderItemsDiv.empty();
+                let total = 0;
+                orderItems.forEach(function(item, index) {
+                    total += item.price * item.quantity;
+                    let itemDiv = $('<div>').addClass('d-flex justify-content-between align-items-center');
+                    let itemInfo = $('<div>').html(`<strong>${item.name}</strong> x ${item.quantity}`);
+                    let itemActions = $('<div>');
+                    let btnIncrease = $('<button>')
+                        .addClass('btn btn-sm btn-success')
+                        .html('+')
+                        .on('click', function() {
+                            item.quantity += 1;
+                            updateOrderSummary();
+                        });
+                    let btnDecrease = $('<button>')
+                        .addClass('btn btn-sm btn-danger ml-1')
+                        .html('-')
+                        .on('click', function() {
+                            item.quantity -= 1;
+                            if (item.quantity <= 0) {
+                                orderItems.splice(index, 1);
+                            }
+                            updateOrderSummary();
+                        });
+                    itemActions.append(btnIncrease, btnDecrease);
+                    itemDiv.append(itemInfo, itemActions);
+                    orderItemsDiv.append(itemDiv);
+                });
+                $('#order-total').text(total.toFixed(2));
+            }
+
+            $('#submit-order').on('click', function() {
+                if (!selectedTable) {
+                    alert('Please select a table.');
+                    return;
+                }
+                if (orderItems.length === 0) {
+                    alert('Please add items to the order.');
+                    return;
+                }
+                let orderData = {
+                    table_id: selectedTable,
+                    items: orderItems.map(item => ({
+                        menu: item.name,
+                        quantity: item.quantity
+                    })),
+                    status: '대기 중'
+                };
+                $.ajax({
+                    url: '/api/orders',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(orderData),
+                    success: function(response) {
+                        if (response.success) {
+                            alert('Order submitted successfully.');
+                            orderItems = [];
+                            updateOrderSummary();
+                        } else {
+                            alert('Error submitting order: ' + response.error);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        alert('Error submitting order: ' + error);
+                    }
+                });
+            });
+
+            // Initial load
+            loadTables();
+            loadCategories();
+        });
+    </script>
+</body>
+</html>

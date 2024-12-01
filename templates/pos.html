@@ -5,32 +5,126 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS 시스템</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* 간단한 스타일링을 추가하여 POS 시스템의 UI 개선 */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: row;
+            padding: 20px;
+        }
+
+        .table-map, .pos-interface {
+            background: #fff;
+            padding: 20px;
+            margin: 10px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .table-map {
+            width: 25%;
+        }
+
+        .pos-interface {
+            width: 75%;
+            display: none;
+        }
+
+        h1, h2 {
+            color: #333;
+        }
+
+        #table-buttons, #category-buttons, #menu-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #007BFF;
+            color: #fff;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .order-summary {
+            margin-top: 20px;
+        }
+
+        .order-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .total-section {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        .submit-btn, .pay-btn {
+            width: 48%;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .table-map, .pos-interface {
+                width: 100%;
+            }
+
+            .submit-btn, .pay-btn {
+                width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>POS 시스템</h1>
-        <div id="table-map" class="table-map">
+        <div class="table-map">
             <h2>테이블 선택</h2>
             <div id="table-buttons">
-                <!-- Table buttons will be dynamically inserted here -->
+                <!-- 테이블 버튼이 동적으로 삽입됩니다 -->
+                <p>로딩 중...</p>
             </div>
         </div>
-        <div id="pos-interface" class="pos-interface" style="display: none;">
+        <div class="pos-interface">
+            <h2>POS 인터페이스</h2>
             <div class="category-section">
-                <h2>카테고리</h2>
+                <h3>카테고리</h3>
                 <div class="category-buttons" id="category-buttons">
-                    <!-- Category buttons will be dynamically inserted here -->
+                    <!-- 카테고리 버튼이 동적으로 삽입됩니다 -->
                 </div>
             </div>
             <div class="menu-section">
-                <h2>메뉴</h2>
+                <h3>메뉴</h3>
                 <div class="menu-buttons" id="menu-buttons">
-                    <!-- Menu buttons will be dynamically inserted here -->
+                    <!-- 메뉴 버튼이 동적으로 삽입됩니다 -->
                 </div>
             </div>
             <div class="order-summary">
-                <h2>주문 내역</h2>
-                <div id="selected-items"></div>
+                <h3>주문 내역</h3>
+                <div id="selected-items">
+                    <p>주문된 항목이 없습니다.</p>
+                </div>
                 <div class="total-section">
                     <div>총계: ₩<span id="total-amount">0</span></div>
                 </div>
@@ -41,199 +135,261 @@
     </div>
 
     <script>
-        let orderItems = [];
-        let selectedTable = null;
-
-        // WebSocket setup
-        const ws = new WebSocket(`ws://${window.location.host}/ws`);
-
-        ws.onopen = function(event) {
-            console.log('WebSocket connection opened');
-        };
-
-        ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            const action = data.action;
-            console.log("WebSocket message received:", data);
-
-            if (action === 'order_update') {
-                console.log('Order update received:', data.order);
-                // Optionally, handle order updates if necessary
-            } else if (action === 'status_update') {
-                // Handle status updates if needed
-                console.log(`Order ${data.orderId} status updated to ${data.status}`);
-                // You can implement UI updates based on status changes here
-            } else if (action === 'test_response') {
-                console.log(data.message);
-            }
-        };
-
-        ws.onclose = function(event) {
-            console.log('WebSocket connection closed');
-        };
-
-        ws.onerror = function(event) {
-            console.error('WebSocket error observed:', event);
-        };
-
-        // Fetch tables from the server
-        async function fetchTables() {
-            try {
-                const response = await fetch('/api/tables');
-                const tables = await response.json();
-                renderTableButtons(tables);
-            } catch (error) {
-                console.error('테이블 데이터를 가져오는 중 오류가 발생했습니다:', error);
-            }
-        }
-
-        // Render table buttons
-        function renderTableButtons(tables) {
-            const tableButtonsContainer = document.getElementById('table-buttons');
-            tables.forEach(table => {
-                const button = document.createElement('button');
-                button.className = 'table-btn';
-                button.onclick = () => selectTable(table.id);
-                button.innerHTML = `테이블 ${table.number}`;
-                tableButtonsContainer.appendChild(button);
+        (() => {
+            // Variables
+            const orderItems = [];
+            let selectedTable = null;
+        
+            // WebSocket 설정
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const ws = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
+        
+            ws.addEventListener('open', () => {
+                console.log('WebSocket 연결이 열렸습니다.');
             });
-        }
-
-        // Select a table and show POS interface
-        function selectTable(tableId) {
-            selectedTable = tableId;
-            document.getElementById('table-map').style.display = 'none';
-            document.getElementById('pos-interface').style.display = 'block';
-            fetchCategoriesAndMenus();
-        }
-
-        // Fetch categories and menus from the server
-        async function fetchCategoriesAndMenus() {
-            try {
-                const response = await fetch('/api/categories');
-                const categories = await response.json();
-                renderCategoryButtons(categories);
-            } catch (error) {
-                console.error('카테고리 데이터를 가져오는 중 오류가 발생했습니다:', error);
-            }
-        }
-
-        // Render category buttons
-        function renderCategoryButtons(categories) {
-            const categoryButtonsContainer = document.getElementById('category-buttons');
-            categoryButtonsContainer.innerHTML = ''; // Clear previous categories
-            categories.forEach(category => {
-                const button = document.createElement('button');
-                button.className = 'category-btn';
-                button.onclick = () => fetchMenus(category.name);
-                button.innerHTML = category.name;
-                categoryButtonsContainer.appendChild(button);
-            });
-        }
-
-        // Fetch menus for a specific category
-        async function fetchMenus(categoryName) {
-            try {
-                const response = await fetch(`/api/menus?category=${categoryName}`);
-                const menus = await response.json();
-                renderMenuButtons(menus);
-            } catch (error) {
-                console.error('메뉴 데이터를 가져오는 중 오류가 발생했습니다:', error);
-            }
-        }
-
-        // Render menu buttons
-        function renderMenuButtons(menus) {
-            const menuButtonsContainer = document.getElementById('menu-buttons');
-            menuButtonsContainer.innerHTML = ''; // Clear previous menus
-            menus.forEach(menu => {
-                const button = document.createElement('button');
-                button.className = 'menu-btn';
-                button.dataset.price = menu.price;
-                button.dataset.category = menu.category;
-                button.onclick = () => addToOrder(menu.name, menu.price, menu.category);
-                button.innerHTML = `${menu.name}<br>₩${parseInt(menu.price).toLocaleString()}`;
-                menuButtonsContainer.appendChild(button);
-            });
-        }
-
-        // Add item to order
-        function addToOrder(menuName, price, category) {
-            orderItems.push({ menu: menuName, price: parseFloat(price), category: category });
-            updateOrderSummary();
-        }
-
-        // Update order summary
-        function updateOrderSummary() {
-            const summaryElement = document.getElementById('selected-items');
-            const totalElement = document.getElementById('total-amount');
-            let total = 0;
-            summaryElement.innerHTML = orderItems.map((item, index) => {
-                total += item.price;
-                return `<div class="order-item">
-                            <div>${item.menu}</div>
-                            <div>₩${item.price.toLocaleString()}</div>
-                        </div>`;
-            }).join('');
-            totalElement.textContent = total.toLocaleString();
-        }
-
-        // Submit order to the server
-        async function submitOrder() {
-            if (orderItems.length === 0) {
-                alert('메뉴를 선택하세요');
-                return;
-            }
-            if (!selectedTable) {
-                alert('테이블을 선택하세요');
-                return;
-            }
-            const order = { 
-                items: orderItems.map(item => ({
-                    menu: item.menu,
-                    quantity: 1, // Assuming quantity as 1, modify if needed
-                })), 
-                table_id: selectedTable, 
-                status: '대기 중' 
-            };
-            try {
-                const response = await fetch('/api/orders', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(order)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    alert('주문이 제출되었습니다.');
-                    orderItems = [];
-                    updateOrderSummary();
-                    // Optionally, notify the server via WebSocket
-                    // ws.send(JSON.stringify({ action: 'order_submitted', order: result.order }));
-                } else {
-                    alert('주문 제출 중 오류가 발생했습니다: ' + result.error);
+        
+            ws.addEventListener('message', (event) => {
+                const data = JSON.parse(event.data);
+                console.log('WebSocket 메시지 수신:', data);
+        
+                switch (data.action) {
+                    case 'order_update':
+                        console.log('주문 업데이트 수신:', data.order);
+                        // 주문 업데이트 처리 로직 추가 가능
+                        break;
+                    case 'status_update':
+                        console.log(`주문 ${data.orderId} 상태가 ${data.status}로 업데이트되었습니다.`);
+                        // 상태 변경에 따른 UI 업데이트 로직 추가 가능
+                        break;
+                    case 'test_response':
+                        console.log(data.message);
+                        break;
+                    default:
+                        console.warn('알 수 없는 action:', data.action);
                 }
-            } catch (error) {
-                console.error('주문 처리 중 오류가 발생했습니다:', error);
-                alert('주문 처리 중 오류가 발생했습니다.');
-            }
-        }
-
-        // Handle payment
-        function payOrder() {
-            if (orderItems.length === 0) {
-                alert('결제할 주문이 없습니다.');
-                return;
-            }
-            alert('결제가 완료되었습니다.');
-            orderItems = [];
-            updateOrderSummary();
-            // Optionally, notify the server about payment
-        }
-
-        // Fetch and render tables on page load
-        fetchTables();
-    </script>
+            });
+        
+            ws.addEventListener('close', () => {
+                console.log('WebSocket 연결이 닫혔습니다.');
+            });
+        
+            ws.addEventListener('error', (event) => {
+                console.error('WebSocket 오류 발생:', event);
+            });
+        
+            // 서버에서 테이블 가져오기
+            const fetchTables = async () => {
+                try {
+                    const response = await fetch('/api/tables');
+                    if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
+                    const tables = await response.json();
+                    renderTableButtons(tables);
+                } catch (error) {
+                    console.error('테이블 데이터를 가져오는 중 오류가 발생했습니다:', error);
+                    const tableButtonsContainer = document.getElementById('table-buttons');
+                    tableButtonsContainer.innerHTML = '<p>테이블 데이터를 불러오는 데 실패했습니다.</p>';
+                }
+            };
+        
+            // 테이블 버튼 렌더링
+            const renderTableButtons = (tables) => {
+                const tableButtonsContainer = document.getElementById('table-buttons');
+                tableButtonsContainer.innerHTML = '';
+                tables.forEach((table) => {
+                    const button = document.createElement('button');
+                    button.className = 'table-btn';
+                    button.textContent = `테이블 ${table.number}`;
+                    button.addEventListener('click', () => selectTable(table.id));
+                    tableButtonsContainer.appendChild(button);
+                });
+            };
+        
+            // 테이블 선택 및 POS 인터페이스 표시
+            const selectTable = (tableId) => {
+                selectedTable = tableId;
+                document.querySelector('.table-map').style.display = 'none';
+                document.querySelector('.pos-interface').style.display = 'block';
+                fetchCategoriesAndMenus();
+            };
+        
+            // 카테고리와 메뉴 가져오기
+            const fetchCategoriesAndMenus = async () => {
+                try {
+                    const response = await fetch('/api/categories');
+                    if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
+                    const categories = await response.json();
+                    renderCategoryButtons(categories);
+                } catch (error) {
+                    console.error('카테고리 데이터를 가져오는 중 오류가 발생했습니다:', error);
+                    const categoryButtonsContainer = document.getElementById('category-buttons');
+                    categoryButtonsContainer.innerHTML = '<p>카테고리 데이터를 불러오는 데 실패했습니다.</p>';
+                }
+            };
+        
+            // 카테고리 버튼 렌더링
+            const renderCategoryButtons = (categories) => {
+                const categoryButtonsContainer = document.getElementById('category-buttons');
+                categoryButtonsContainer.innerHTML = '';
+                categories.forEach((category) => {
+                    const button = document.createElement('button');
+                    button.className = 'category-btn';
+                    button.textContent = category.name;
+                    button.addEventListener('click', () => fetchMenus(category.id));
+                    categoryButtonsContainer.appendChild(button);
+                });
+            };
+        
+            // 특정 카테고리의 메뉴 가져오기
+            const fetchMenus = async (categoryId) => {
+                try {
+                    const response = await fetch(`/api/menus?category_id=${categoryId}`);
+                    if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
+                    const menus = await response.json();
+                    renderMenuButtons(menus);
+                } catch (error) {
+                    console.error('메뉴 데이터를 가져오는 중 오류가 발생했습니다:', error);
+                    const menuButtonsContainer = document.getElementById('menu-buttons');
+                    menuButtonsContainer.innerHTML = '<p>메뉴 데이터를 불러오는 데 실패했습니다.</p>';
+                }
+            };
+        
+            // 메뉴 버튼 렌더링
+            const renderMenuButtons = (menus) => {
+                const menuButtonsContainer = document.getElementById('menu-buttons');
+                menuButtonsContainer.innerHTML = '';
+                if (menus.length === 0) {
+                    menuButtonsContainer.innerHTML = '<p>해당 카테고리에 메뉴가 없습니다.</p>';
+                    return;
+                }
+                menus.forEach((menu) => {
+                    const button = document.createElement('button');
+                    button.className = 'menu-btn';
+                    button.dataset.price = menu.price;
+                    button.dataset.category = menu.category;
+                    button.addEventListener('click', () => addToOrder(menu));
+                    
+                    const menuName = document.createElement('div');
+                    menuName.textContent = menu.name;
+                    const menuPrice = document.createElement('div');
+                    menuPrice.textContent = `₩${parseInt(menu.price).toLocaleString()}`;
+                    
+                    button.appendChild(menuName);
+                    button.appendChild(menuPrice);
+                    menuButtonsContainer.appendChild(button);
+                });
+            };
+        
+            // 주문 항목 추가
+            const addToOrder = (menu) => {
+                orderItems.push({
+                    menu: menu.name,
+                    price: parseFloat(menu.price),
+                    category: menu.category
+                });
+                updateOrderSummary();
+            };
+        
+            // 주문 요약 업데이트
+            const updateOrderSummary = () => {
+                const summaryElement = document.getElementById('selected-items');
+                const totalElement = document.getElementById('total-amount');
+                summaryElement.innerHTML = '';
+                let total = 0;
+        
+                if (orderItems.length === 0) {
+                    summaryElement.innerHTML = '<p>주문된 항목이 없습니다.</p>';
+                    totalElement.textContent = '0';
+                    return;
+                }
+        
+                orderItems.forEach((item) => {
+                    total += item.price;
+                    const orderItemDiv = document.createElement('div');
+                    orderItemDiv.className = 'order-item';
+        
+                    const menuDiv = document.createElement('div');
+                    menuDiv.textContent = item.menu;
+        
+                    const priceDiv = document.createElement('div');
+                    priceDiv.textContent = `₩${item.price.toLocaleString()}`;
+        
+                    orderItemDiv.appendChild(menuDiv);
+                    orderItemDiv.appendChild(priceDiv);
+                    summaryElement.appendChild(orderItemDiv);
+                });
+        
+                totalElement.textContent = total.toLocaleString();
+            };
+        
+            // 주문 서버로 제출
+            const submitOrder = async () => {
+                if (orderItems.length === 0) {
+                    alert('메뉴를 선택하세요.');
+                    return;
+                }
+                if (!selectedTable) {
+                    alert('테이블을 선택하세요.');
+                    return;
+                }
+        
+                const order = {
+                    items: orderItems.map((item) => ({
+                        menu: item.menu,
+                        quantity: 1 // 수량 수정 가능
+                    })),
+                    table_id: selectedTable,
+                    status: '대기 중'
+                };
+        
+                try {
+                    const response = await fetch('/api/orders', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(order)
+                    });
+                    if (!response.ok) throw new Error(`HTTP 오류! 상태: ${response.status}`);
+                    const result = await response.json();
+        
+                    if (result.success) {
+                        alert('주문이 제출되었습니다.');
+                        orderItems.length = 0;
+                        updateOrderSummary();
+                        // ws.send(JSON.stringify({ action: 'order_submitted', order: result.order })); // 선택 사항
+                    } else {
+                        alert('주문 제출 중 오류가 발생했습니다: ' + result.error);
+                    }
+                } catch (error) {
+                    console.error('주문 처리 중 오류가 발생했습니다:', error);
+                    alert('주문 처리 중 오류가 발생했습니다.');
+                }
+            };
+        
+            // 결제 처리
+            const payOrder = () => {
+                if (orderItems.length === 0) {
+                    alert('결제할 주문이 없습니다.');
+                    return;
+                }
+                if (!selectedTable) {
+                    alert('테이블을 선택하지 않았습니다.');
+                    return;
+                }
+                // 결제 로직 추가 필요 (예: 결제 API 호출)
+                alert('결제가 완료되었습니다.');
+                orderItems.length = 0;
+                updateOrderSummary();
+                // 서버에 결제 완료 알림 전송 (선택 사항)
+            };
+        
+            // 페이지 로드 시 테이블 데이터 가져오기
+            window.addEventListener('load', fetchTables);
+        
+            // 전역에서 호출해야 하는 함수 노출
+            window.submitOrder = submitOrder;
+            window.payOrder = payOrder;
+        
+        })();
+        </script>
+        
 </body>
 </html>

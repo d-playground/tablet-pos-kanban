@@ -4,6 +4,30 @@
     <meta charset="UTF-8">
     <title>메뉴 관리</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* Optional: Add some basic styling for better visualization */
+        .container {
+            width: 80%;
+            margin: auto;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        table, th, td {
+            border: 1px solid #aaa;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+        }
+        button {
+            padding: 5px 10px;
+            margin: 5px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -23,13 +47,15 @@
                     <td contenteditable="true">{{ menu.name }}</td>
                     <td><input type="number" value="{{ menu.price }}" /></td>
                     <td>
-                        <select>
-                            <option value="drink" {% if menu.category == 'drink' %}selected{% endif %}>Drink</option>
-                            <option value="food" {% if menu.category == 'food' %}selected{% endif %}>Food</option>
-                        </select>
+                        <input list="categories-list" name="category" value="{{ menu.category }}" />
+                        <datalist id="categories-list">
+                            {% for category in categories %}
+                            <option value="{{ category }}"></option>
+                            {% endfor %}
+                        </datalist>
                     </td>
                     <td>
-                        <button onclick="deleteMenuItem({{ menu.id }})">삭제</button>
+                        <button onclick="deleteMenuItem({{ menu.id }}, this)">삭제</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -40,17 +66,24 @@
     </div>
 
     <script>
+        // Pass categories from server to JavaScript
+        const categories = {{ categories | tojson }};
+
         function addMenuItem() {
             const table = document.getElementById('menu-table');
             const newRow = table.insertRow();
+            let options = '';
+            categories.forEach(category => {
+                options += `<option value="${category}"></option>`;
+            });
             newRow.innerHTML = `
                 <td contenteditable="true"></td>
                 <td><input type="number" /></td>
                 <td>
-                    <select>
-                        <option value="drink">Drink</option>
-                        <option value="food">Food</option>
-                    </select>
+                    <input list="categories-list" name="category" />
+                    <datalist id="categories-list">
+                        ${options}
+                    </datalist>
                 </td>
                 <td><button onclick="deleteMenuItem(null, this)">삭제</button></td>
             `;
@@ -58,60 +91,115 @@
 
         function deleteMenuItem(id, button) {
             if (id) {
+                if (!confirm('정말로 이 메뉴를 삭제하시겠습니까?')) {
+                    return;
+                }
                 fetch(`/api/menu/${id}`, { method: 'DELETE' })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
                             button.closest('tr').remove();
+                            updateCategories();
                         } else {
                             alert('삭제 중 오류가 발생했습니다: ' + data.error);
                         }
+                    })
+                    .catch(error => {
+                        console.error('Error deleting menu item:', error);
+                        alert('삭제 중 오류가 발생했습니다.');
                     });
             } else {
                 button.closest('tr').remove();
+                updateCategories();
             }
         }
 
         function saveChanges() {
             const rows = document.querySelectorAll('#menu-table tr');
+            let promises = [];
+
             rows.forEach(row => {
                 const id = row.dataset.id;
                 const name = row.cells[0].textContent.trim();
-                const price = parseFloat(row.cells[1].querySelector('input').value.trim());
-                const category = row.cells[2].querySelector('select').value;
+                const priceInput = row.cells[1].querySelector('input');
+                const price = parseFloat(priceInput.value.trim());
+                const input = row.cells[2].querySelector('input[name="category"]');
+                const category = input.value.trim();
 
-                if (!name || isNaN(price) || !['drink', 'food'].includes(category)) {
-                    alert('데이터 형식이 잘못되었습니다.');
+                if (!name || isNaN(price) || !category) {
+                    alert('데이터 형식이 잘못되었습니다: 모든 필드를 올바르게 입력해주세요.');
                     return;
                 }
 
                 const data = { name, price, category };
 
+                let url, method;
                 if (id) {
-                    fetch(`/api/menu/${id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
-                    }).then(response => response.json())
-                      .then(data => {
-                          if (!data.success) {
-                              alert('저장 중 오류가 발생했습니다: ' + data.error);
-                          }
-                      });
+                    url = `/api/menu/${id}`;
+                    method = 'PUT';
                 } else {
-                    fetch('/api/menu', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
-                    }).then(response => response.json())
-                      .then(data => {
-                          if (!data.success) {
-                              alert('저장 중 오류가 발생했습니다: ' + data.error);
-                          }
-                      });
+                    url = `/api/menu`;
+                    method = 'POST';
+                }
+
+                const promise = fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        alert('저장 중 오류가 발생했습니다: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error saving menu item:', error);
+                    alert('저장 중 오류가 발생했습니다.');
+                });
+
+                promises.push(promise);
+            });
+
+            // Wait for all save operations to complete
+            Promise.all(promises)
+                .then(() => {
+                    alert('모든 변경 사항이 저장되었습니다.');
+                    location.reload(); // Optionally, reload to fetch updated data
+                });
+        }
+
+        // Function to update the datalist with current categories
+        function updateCategories() {
+            const categoryInputs = document.querySelectorAll('input[name="category"]');
+            let currentCategories = new Set();
+
+            categoryInputs.forEach(input => {
+                if (input.value.trim()) {
+                    currentCategories.add(input.value.trim());
                 }
             });
+
+            const datalist = document.getElementById('categories-list');
+            datalist.innerHTML = ''; // Clear existing options
+
+            currentCategories.forEach(category => {
+                const option = document.createElement('option');
+                option.value = category;
+                datalist.appendChild(option);
+            });
         }
+
+        // Update datalist whenever the DOM is updated
+        document.addEventListener('DOMContentLoaded', () => {
+            updateCategories();
+
+            // Optionally, watch for changes to update categories in real-time
+            const table = document.getElementById('menu-table');
+            table.addEventListener('input', () => {
+                updateCategories();
+            });
+        });
     </script>
 </body>
 </html> 

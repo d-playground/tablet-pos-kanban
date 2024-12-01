@@ -14,8 +14,6 @@ Toy Project for Full-stack Web Application Development.
 - [File Structure](#file-structure)
 - [API Endpoints](#api-endpoints)
 - [SocketIO Events](#socketio-events)
-- [Contributing](#contributing)
-- [License](#license)
 
 ## Introduction
 
@@ -31,7 +29,7 @@ The **Kanban POS System for Tablet** is a application designed for managing rest
 - **Responsive Design:** User-friendly interfaces optimized for various devices.
 - **Database Connection Pooling:** Efficient handling of database connections using MySQL connection pooling.
 
-## Technologies Used
+## Stacks Used
 
 - **Backend:**
   - [Flask](https://flask.palletsprojects.com/) - Web framework for Python.

@@ -4,30 +4,6 @@
     <meta charset="UTF-8">
     <title>메뉴 관리</title>
     <link rel="stylesheet" href="/static/css/style.css">
-    <style>
-        /* Optional: Add some basic styling for better visualization */
-        .container {
-            width: 80%;
-            margin: auto;
-            padding: 20px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-        }
-        table, th, td {
-            border: 1px solid #aaa;
-        }
-        th, td {
-            padding: 10px;
-            text-align: center;
-        }
-        button {
-            padding: 5px 10px;
-            margin: 5px;
-        }
-    </style>
 </head>
 <body>
     <div class="container">
@@ -42,23 +18,7 @@
                 </tr>
             </thead>
             <tbody id="menu-table">
-                {% for menu in menus %}
-                <tr data-id="{{ menu.id }}">
-                    <td contenteditable="true">{{ menu.name }}</td>
-                    <td><input type="number" value="{{ menu.price }}" /></td>
-                    <td>
-                        <input list="categories-list" name="category" value="{{ menu.category }}" />
-                        <datalist id="categories-list">
-                            {% for category in categories %}
-                            <option value="{{ category }}"></option>
-                            {% endfor %}
-                        </datalist>
-                    </td>
-                    <td>
-                        <button onclick="deleteMenuItem({{ menu.id }}, this)">삭제</button>
-                    </td>
-                </tr>
-                {% endfor %}
+                <!-- 메뉴 항목이 동적으로 삽입됩니다 -->
             </tbody>
         </table>
         <button onclick="addMenuItem()">메뉴 추가</button>
@@ -66,140 +26,151 @@
     </div>
 
     <script>
-        // Pass categories from server to JavaScript
-        const categories = {{ categories | tojson }};
+        var menus = [];
 
-        function addMenuItem() {
-            const table = document.getElementById('menu-table');
-            const newRow = table.insertRow();
-            let options = '';
-            categories.forEach(category => {
-                options += `<option value="${category}"></option>`;
+        // 메뉴 로드
+        fetch('/get_menus')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    menus = data.menus;
+                    renderMenuTable();
+                }
             });
-            newRow.innerHTML = `
-                <td contenteditable="true"></td>
-                <td><input type="number" /></td>
-                <td>
-                    <input list="categories-list" name="category" />
-                    <datalist id="categories-list">
-                        ${options}
-                    </datalist>
-                </td>
-                <td><button onclick="deleteMenuItem(null, this)">삭제</button></td>
-            `;
+
+        function renderMenuTable() {
+            var menuTable = document.getElementById('menu-table');
+            menuTable.innerHTML = '';
+            menus.forEach(function(menu, index) {
+                if (menu.action === 'delete') return;  // 삭제 요청된 메뉴는 렌더링하지 않음
+
+                var row = document.createElement('tr');
+
+                // 이름 셀
+                var nameCell = document.createElement('td');
+                var nameInput = document.createElement('input');
+                nameInput.value = menu.name;
+                nameInput.onchange = function() {
+                    menu.name = nameInput.value;
+                    if (menu.action !== 'add') {
+                        menu.action = 'update';
+                    }
+                };
+                nameCell.appendChild(nameInput);
+                row.appendChild(nameCell);
+
+                // 가격 셀
+                var priceCell = document.createElement('td');
+                var priceInput = document.createElement('input');
+                priceInput.type = 'number';
+                priceInput.value = menu.price;
+                priceInput.min = "0";
+                priceInput.step = "0.01";
+                priceInput.onchange = function() {
+                    var parsedValue = parseFloat(priceInput.value);
+                    if (isNaN(parsedValue) || parsedValue < 0) {
+                        alert('유효한 가격을 입력해주세요.');
+                        priceInput.value = menu.price;
+                        return;
+                    }
+                    menu.price = parsedValue;
+                    if (menu.action !== 'add') {
+                        menu.action = 'update';
+                    }
+                };
+                priceCell.appendChild(priceInput);
+                row.appendChild(priceCell);
+
+                // 카테고리 셀
+                var categoryCell = document.createElement('td');
+                var categoryInput = document.createElement('input');
+                categoryInput.value = menu.category;
+                categoryInput.onchange = function() {
+                    menu.category = categoryInput.value;
+                    if (menu.action !== 'add') {
+                        menu.action = 'update';
+                    }
+                };
+                categoryCell.appendChild(categoryInput);
+                row.appendChild(categoryCell);
+
+                // 작업 셀
+                var actionCell = document.createElement('td');
+                var deleteBtn = document.createElement('button');
+                deleteBtn.textContent = '삭제';
+                deleteBtn.onclick = function() {
+                    if (menu.action === 'add') {
+                        // 신규로 추가된 메뉴인 경우 배열에서 완전히 제거
+                        menus.splice(index, 1);
+                    } else {
+                        menu.action = 'delete';
+                    }
+                    renderMenuTable();
+                };
+                actionCell.appendChild(deleteBtn);
+
+                row.appendChild(actionCell);
+
+                menuTable.appendChild(row);
+            });
         }
 
-        function deleteMenuItem(id, button) {
-            if (id) {
-                if (!confirm('정말로 이 메뉴를 삭제하시겠습니까?')) {
-                    return;
-                }
-                fetch(`/api/menu/${id}`, { method: 'DELETE' })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            button.closest('tr').remove();
-                            updateCategories();
-                        } else {
-                            alert('삭제 중 오류가 발생했습니다: ' + data.error);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error deleting menu item:', error);
-                        alert('삭제 중 오류가 발생했습니다.');
-                    });
-            } else {
-                button.closest('tr').remove();
-                updateCategories();
-            }
+        function addMenuItem() {
+            var newMenu = {
+                id: null,
+                name: '',
+                price: 0.00,
+                category: '',
+                action: 'add'
+            };
+            menus.push(newMenu);
+            renderMenuTable();
         }
 
         function saveChanges() {
-            const rows = document.querySelectorAll('#menu-table tr');
-            let promises = [];
-
-            rows.forEach(row => {
-                const id = row.dataset.id;
-                const name = row.cells[0].textContent.trim();
-                const priceInput = row.cells[1].querySelector('input');
-                const price = parseFloat(priceInput.value.trim());
-                const input = row.cells[2].querySelector('input[name="category"]');
-                const category = input.value.trim();
-
-                if (!name || isNaN(price) || !category) {
-                    alert('데이터 형식이 잘못되었습니다: 모든 필드를 올바르게 입력해주세요.');
-                    return;
-                }
-
-                const data = { name, price, category };
-
-                let url, method;
-                if (id) {
-                    url = `/api/menu/${id}`;
-                    method = 'PUT';
-                } else {
-                    url = `/api/menu`;
-                    method = 'POST';
-                }
-
-                const promise = fetch(url, {
-                    method: method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (!data.success) {
-                        alert('저장 중 오류가 발생했습니다: ' + data.error);
+            var changedMenus = menus.filter(menu => menu.action);
+            // 유효성 검사 강화
+            var isValid = true;
+            changedMenus.forEach(menu => {
+                if (menu.action !== 'delete') {
+                    if (!menu.name.trim()) {
+                        alert('메뉴 이름을 입력해주세요.');
+                        isValid = false;
+                        return;
                     }
-                })
-                .catch(error => {
-                    console.error('Error saving menu item:', error);
-                    alert('저장 중 오류가 발생했습니다.');
-                });
-
-                promises.push(promise);
-            });
-
-            // Wait for all save operations to complete
-            Promise.all(promises)
-                .then(() => {
-                    alert('모든 변경 사항이 저장되었습니다.');
-                    location.reload(); // Optionally, reload to fetch updated data
-                });
-        }
-
-        // Function to update the datalist with current categories
-        function updateCategories() {
-            const categoryInputs = document.querySelectorAll('input[name="category"]');
-            let currentCategories = new Set();
-
-            categoryInputs.forEach(input => {
-                if (input.value.trim()) {
-                    currentCategories.add(input.value.trim());
+                    if (menu.price < 0) {
+                        alert('메뉴 가격은 0 이상이어야 합니다.');
+                        isValid = false;
+                        return;
+                    }
+                    if (!menu.category.trim()) {
+                        alert('메뉴 카테고리를 입력해주세요.');
+                        isValid = false;
+                        return;
+                    }
                 }
             });
+            if (!isValid) return;
 
-            const datalist = document.getElementById('categories-list');
-            datalist.innerHTML = ''; // Clear existing options
-
-            currentCategories.forEach(category => {
-                const option = document.createElement('option');
-                option.value = category;
-                datalist.appendChild(option);
+            fetch('/manage_menus', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({menus: changedMenus})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('변경 사항이 저장되었습니다.');
+                    location.reload();
+                } else {
+                    alert('변경 사항 저장에 실패하였습니다. ' + (data.message || ''));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('변경 사항 저장에 실패하였습니다.');
             });
         }
-
-        // Update datalist whenever the DOM is updated
-        document.addEventListener('DOMContentLoaded', () => {
-            updateCategories();
-
-            // Optionally, watch for changes to update categories in real-time
-            const table = document.getElementById('menu-table');
-            table.addEventListener('input', () => {
-                updateCategories();
-            });
-        });
     </script>
 </body>
-</html> 
+</html>

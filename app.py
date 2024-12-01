@@ -1,18 +1,10 @@
+from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO, emit
 import mysql.connector
+from mysql.connector import pooling
 from datetime import datetime
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-import uvicorn
-from typing import List
-import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, filename='app.log',
-                    format='%(asctime)s:%(levelname)s:%(message)s')
-
-# Database configuration
+# 데이터베이스 설정
 db_config = {
     'host': 'localhost',
     'user': 'user1',
@@ -22,109 +14,51 @@ db_config = {
     'collation': 'utf8mb4_general_ci'
 }
 
+# 데이터베이스 연결 풀 생성
+db_pool = mysql.connector.pooling.MySQLConnectionPool(
+    pool_name="pos_pool",
+    pool_size=5,
+    **db_config
+)
+
 def get_db():
-    return mysql.connector.connect(**db_config)
+    return db_pool.get_connection()
 
+app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
+# 라우트 정의
+@app.route("/")
+def index():
+    return render_template('index.html')
 
-def init_db():
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            # Create menus table with category as ENUM
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS menus (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
-                    price DECIMAL(10, 2) NOT NULL,
-                    category ENUM('칵테일', '커스텀칵테일', '간식거리', '위스키(잔)','위스키(병)') NOT NULL
-                )
-            ''')
-            # Create tables table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS tables (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    number INT NOT NULL UNIQUE,
-                    name VARCHAR(255) NOT NULL
-                )
-            ''')
-            # Create orders table with category as ENUM and menu as VARCHAR
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS orders (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    table_id INT,
-                    menu VARCHAR(255) NOT NULL,
-                    quantity INT NOT NULL,
-                    status VARCHAR(50) NOT NULL,
-                    category ENUM('칵테일', '커스텀칵테일', '간식거리', '위스키(잔)','위스키(병)') NOT NULL,
-                    created_at DATETIME NOT NULL,
-                    total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-                    FOREIGN KEY (table_id) REFERENCES tables(id)
-                )
-            ''')
-            conn.commit()
+@app.route("/pos")
+def pos():
+    return render_template('pos.html')
 
-# Initialize the database (optional if tables already exist)
-init_db()
+@app.route("/order")
+def order():
+    return render_template('order.html')
 
-app = FastAPI()
-templates = Jinja2Templates(directory='templates')
-app.mount("/static", StaticFiles(directory="static"), name="static")
+@app.route("/bar1")
+def bar1():
+    return render_template('bar1.html')
 
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
+@app.route("/bar2")
+def bar2():
+    return render_template('bar2.html')
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logging.info(f"Client connected: {websocket.client}")
+@app.route("/kitchen")
+def kitchen():
+    return render_template('kitchen.html')
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        logging.info(f"Client disconnected: {websocket.client}")
+@app.route("/table-map")
+def table_map():
+    return render_template('table_map.html')
 
-    async def send_personal_message(self, message: dict, websocket: WebSocket):
-        await websocket.send_json(message)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            await connection.send_json(message)
-
-manager = ConnectionManager()
-
-# Routes for rendering templates
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse('index.html', {"request": request})
-
-@app.get("/pos", response_class=HTMLResponse)
-async def pos(request: Request):
-    return templates.TemplateResponse('pos.html', {"request": request})
-
-@app.get("/order", response_class=HTMLResponse)
-async def order(request: Request):
-    return templates.TemplateResponse('order.html', {"request": request})
-
-@app.get("/bar1", response_class=HTMLResponse)
-async def bar1(request: Request):
-    return templates.TemplateResponse('bar1.html', {"request": request})
-
-@app.get("/bar2", response_class=HTMLResponse)
-async def bar2(request: Request):
-    return templates.TemplateResponse('bar2.html', {"request": request})
-
-@app.get("/kitchen", response_class=HTMLResponse)
-async def kitchen(request: Request):
-    return templates.TemplateResponse('kitchen.html', {"request": request})
-
-@app.get("/table-map", response_class=HTMLResponse)
-async def table_map(request: Request):
-    return templates.TemplateResponse('table_map.html', {"request": request})
-
-@app.get("/menu", response_class=HTMLResponse)
-async def menu(request: Request):
-    # Fetch menus
+@app.route("/menu")
+def menu():
+    # 메뉴 가져오기
     with get_db() as conn:
         with conn.cursor(dictionary=True) as cursor:
             cursor.execute('''
@@ -132,355 +66,192 @@ async def menu(request: Request):
                 FROM menus
             ''')
             menus = cursor.fetchall()
-    
-    # Fetch distinct categories from 'menus' table
+
+    # 카테고리 가져오기
     with get_db() as conn:
         with conn.cursor() as cursor:
             cursor.execute('SELECT DISTINCT category FROM menus')
             categories_records = cursor.fetchall()
             categories = [record[0] for record in categories_records]
-    
-    return templates.TemplateResponse('menu.html', {"request": request, "menus": menus, "categories": categories})
 
-# API routes
-@app.post('/api/menu')
-async def add_menu_item(request: Request):
-    data = await request.json()
-    name = data.get('name')
-    price = data.get('price')
-    category = data.get('category')
-    
-    if not name or not price or not category:
-        return JSONResponse({'success': False, 'error': 'All fields are required.'}, status_code=400)
-    
+    return render_template('menu.html', menus=menus, categories=categories)
+
+# 테이블 목록 가져오기
+@app.route("/get_tables")
+def get_tables():
     with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute('''
+        with conn.cursor(dictionary=True) as cursor:
+            cursor.execute('SELECT id, name FROM tables')
+            tables = cursor.fetchall()
+    return jsonify({'status': 'success', 'tables': tables})
+
+# 테이블 맵 관리 (테이블 추가/수정/삭제)
+@app.route("/manage_tables", methods=['POST'])
+def manage_tables():
+    data = request.get_json()
+    tables = data.get('tables')  # [{id, name, action}, ...]
+
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        for table in tables:
+            action = table.get('action')
+            table_id = table.get('id')
+            if action == 'add':
+                cursor.execute("""
+                    INSERT INTO tables (name) VALUES (%s)
+                """, (table['name'],))
+            elif action == 'update':
+                if not table_id:
+                    raise ValueError("테이블 ID가 필요합니다.")
+                cursor.execute("""
+                    UPDATE tables SET name=%s WHERE id=%s
+                """, (table['name'], table_id))
+            elif action == 'delete':
+                if not table_id:
+                    # id가 없으면 삭제 시도를 생략
+                    continue
+                cursor.execute("""
+                    DELETE FROM tables WHERE id=%s
+                """, (table_id,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(e)
+        return jsonify({'status': 'error', 'message': str(e)})
+    finally:
+        cursor.close()
+        conn.close()
+    return jsonify({'status': 'success'})
+
+# 주문 생성
+@app.route("/place_order", methods=['POST'])
+def place_order():
+    data = request.get_json()
+    table_id = data.get('table_id')
+    items = data.get('items')  # [{'menu_id': ..., 'quantity': ...}, ...]
+
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        # 새로운 주문 생성
+        cursor.execute("""
+            INSERT INTO orders (table_id, status, created_at)
+            VALUES (%s, %s, %s)
+        """, (table_id, 'pending', datetime.now()))
+        order_id = cursor.lastrowid
+
+        # 주문 아이템 추가
+        for item in items:
+            menu_id = item['menu_id']
+            quantity = item['quantity']
+            cursor.execute("""
+                INSERT INTO order_items (order_id, menu_id, quantity)
+                VALUES (%s, %s, %s)
+            """, (order_id, menu_id, quantity))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(e)
+        return jsonify({'status': 'error', 'message': str(e)})
+    finally:
+        cursor.close()
+        conn.close()
+
+    # 새로운 주문이 생성되었음을 모든 클라이언트에게 알림
+    try:
+        socketio.emit('new_order', {'order_id': order_id}, broadcast=True)
+    except TypeError as te:
+        print(f"Emit failed: {te}")
+        # 대안: Namespace를 명시하거나, 다른 방법으로 브로드캐스트
+        socketio.emit('new_order', {'order_id': order_id}, broadcast=True, namespace='/')
+
+    return jsonify({'status': 'success', 'order_id': order_id})
+
+# 주문 상태 업데이트
+@app.route("/update_order_status", methods=['POST'])
+def update_order_status():
+    data = request.get_json()
+    order_id = data.get('order_id')
+    status = data.get('status')
+
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE orders SET status=%s WHERE id=%s
+        """, (status, order_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(e)
+        return jsonify({'status': 'error', 'message': str(e)})
+    finally:
+        cursor.close()
+        conn.close()
+
+    # 주문 상태 변경 알림
+    try:
+        socketio.emit('order_status_update', {'order_id': order_id, 'status': status}, broadcast=True)
+    except TypeError as te:
+        print(f"Emit failed: {te}")
+        socketio.emit('order_status_update', {'order_id': order_id, 'status': status}, broadcast=True, namespace='/')
+
+    return jsonify({'status': 'success'})
+
+# 메뉴 관리 (메뉴 추가/수정/삭제)
+@app.route("/manage_menus", methods=['POST'])
+def manage_menus():
+    data = request.get_json()
+    menus = data.get('menus')  # [{id, name, price, category, action}, ...]
+
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        for menu in menus:
+            action = menu.get('action')
+            if action == 'add':
+                cursor.execute("""
                     INSERT INTO menus (name, price, category)
                     VALUES (%s, %s, %s)
-                ''', (name, price, category))
-                conn.commit()
-                return JSONResponse({'success': True})
-            except Exception as e:
-                logging.error(f"Error adding menu item: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+                """, (menu['name'], menu['price'], menu['category']))
+            elif action == 'update':
+                cursor.execute("""
+                    UPDATE menus SET name=%s, price=%s, category=%s WHERE id=%s
+                """, (menu['name'], menu['price'], menu['category'], menu['id']))
+            elif action == 'delete':
+                cursor.execute("""
+                    DELETE FROM menus WHERE id=%s
+                """, (menu['id'],))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(e)
+        return jsonify({'status': 'error', 'message': str(e)})
+    finally:
+        cursor.close()
+        conn.close()
+    return jsonify({'status': 'success'})
 
-@app.put('/api/menu/{menu_id}')
-async def edit_menu_item(menu_id: int, request: Request):
-    data = await request.json()
-    logging.info(f"Received PUT request for menu_id {menu_id}: {data}")
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                # Ensure the category exists by ENUM validation
-                cursor.execute('''
-                    UPDATE menus
-                    SET name = %s, price = %s, category = %s
-                    WHERE id = %s
-                ''', (data['name'], data['price'], data['category'], menu_id))
-                if cursor.rowcount == 0:
-                    logging.warning(f"Menu item with id {menu_id} not found.")
-                    return JSONResponse({'success': False, 'error': 'Menu item not found.'}, status_code=404)
-                conn.commit()
-                logging.info(f"Menu item with id {menu_id} updated successfully.")
-                return JSONResponse({'success': True})
-            except mysql.connector.IntegrityError as e:
-                if 'ER_TRUNCATED_WRONG_VALUE' in str(e):
-                    logging.warning(f"Invalid category name: {data['category']}")
-                    return JSONResponse({'success': False, 'error': 'Invalid category name.'}, status_code=400)
-                logging.error(f"Integrity error editing menu item: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': 'Database integrity error.'}, status_code=500)
-            except Exception as e:
-                logging.error(f"Error editing menu item: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+# SocketIO 이벤트 핸들러
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected:', request.sid)
 
-@app.delete('/api/menu/{menu_id}')
-async def delete_menu_item(menu_id: int):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute('DELETE FROM menus WHERE id = %s', (menu_id,))
-                if cursor.rowcount == 0:
-                    logging.warning(f"Menu item with id {menu_id} not found.")
-                    return JSONResponse({'success': False, 'error': 'Menu item not found.'}, status_code=404)
-                conn.commit()
-                logging.info(f"Menu item with id {menu_id} deleted successfully.")
-                return JSONResponse({'success': True})
-            except Exception as e:
-                logging.error(f"Error deleting menu item: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected:', request.sid)
 
-# WebSocket endpoint
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            action = data.get('action')
-            if action == 'change_status':
-                await handle_change_status(data, websocket)
-            elif action == 'test_event':
-                await handle_test_event(data, websocket)
-            # You can handle more actions here
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-async def handle_change_status(data: dict, websocket: WebSocket):
-    order_id = data.get('orderId')
-    new_status = data.get('status')
-    if not order_id or not new_status:
-        await manager.send_personal_message({'success': False, 'error': 'Invalid data.'}, websocket)
-        return
-
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute('''
-                    UPDATE orders
-                    SET status = %s
-                    WHERE id = %s
-                ''', (new_status, order_id))
-                if cursor.rowcount == 0:
-                    await manager.send_personal_message({'success': False, 'error': 'Order not found.'}, websocket)
-                    return
-                conn.commit()
-                logging.info(f"Order {order_id} status updated to {new_status}.")
-                # Broadcast status update to all clients
-                await manager.broadcast({
-                    'action': 'status_update',
-                    'orderId': order_id,
-                    'status': new_status
-                })
-            except Exception as e:
-                logging.error(f"Error updating order status: {e}", exc_info=True)
-                await manager.send_personal_message({'success': False, 'error': str(e)}, websocket)
-
-async def handle_test_event(data: dict, websocket: WebSocket):
-    logging.info(f"Test event received: {data}")
-    await manager.send_personal_message({'action': 'test_response', 'message': 'Hello, client!'}, websocket)
-
-@app.get('/api/orders/{category}')
-async def get_orders_by_category(category: str):
+@app.route("/get_menus")
+def get_menus():
     with get_db() as conn:
         with conn.cursor(dictionary=True) as cursor:
-            try:
-                cursor.execute('''
-                    SELECT o.*, t.number as table_number 
-                    FROM orders o
-                    JOIN tables t ON o.table_id = t.id
-                    WHERE o.category = %s AND o.status IN ('대기 중', '진행 중')
-                    ORDER BY o.created_at DESC
-                ''', (category,))
-                orders = cursor.fetchall()
-                for order in orders:
-                    if 'created_at' in order and isinstance(order['created_at'], datetime):
-                        order['created_at'] = order['created_at'].strftime('%Y-%m-%d %H:%M:%S')
-                logging.info(f"Fetched orders for category {category}.")
-                return {'orders': orders}
-            except Exception as e:
-                logging.error(f"Error fetching orders by category: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.get('/api/analytics')
-async def get_analytics():
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            try:
-                cursor.execute('''
-                    SELECT 
-                        DATE(created_at) as date,
-                        COUNT(*) as order_count,
-                        SUM(total_amount) as daily_revenue
-                    FROM orders
-                    GROUP BY DATE(created_at)
-                    ORDER BY date DESC
-                    LIMIT 30
-                ''')
-                sales_data = cursor.fetchall()
-                logging.info("Fetched sales analytics data.")
-                return {'sales_data': sales_data}
-            except Exception as e:
-                logging.error(f"Error fetching analytics data: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.get('/api/menus')
-async def get_menus(category_name: str = None):
-    query = '''
-        SELECT * 
-        FROM menus 
-    '''
-    params = ()
-    if category_name:
-        query += ' WHERE category = %s'
-        params = (category_name,)
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            try:
-                cursor.execute(query, params)
-                menus = cursor.fetchall()
-                logging.info(f"Fetched menus with category filter: {category_name}")
-                return JSONResponse(menus)
-            except Exception as e:
-                logging.error(f"Error fetching menus: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.get('/api/categories')
-async def get_categories():
-    # Since categories are now ENUM, you can define them directly
-    categories = ['칵테일', '커스텀칵테일', '간식거리', '위스키(잔)','위스키(병)']
-    return JSONResponse({'categories': categories})
-
-@app.get('/api/tables')
-async def get_tables():
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            try:
-                cursor.execute('SELECT id, number, name FROM tables')
-                tables = cursor.fetchall()
-                logging.info("Fetched tables data.")
-                return JSONResponse(tables)
-            except Exception as e:
-                logging.error(f"Error fetching tables: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.post('/api/orders')
-async def create_order(request: Request):
-    data = await request.json()
-    current_time = datetime.now()
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            try:
-                order_items = []
-                for item in data['items']:
-                    # Fetch menu details
-                    cursor.execute('SELECT price, category FROM menus WHERE name = %s', (item['menu'],))
-                    menu = cursor.fetchone()
-                    if not menu:
-                        raise ValueError(f"Menu item '{item['menu']}' not found.")
-
-                    price = float(menu['price'])
-                    total_price = price * item['quantity']
-                    category_name = menu['category']
-
-                    # Insert order
-                    cursor.execute('''
-                        INSERT INTO orders (table_id, menu, quantity, status, category, created_at, total_amount)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ''', (data['table_id'], item['menu'], item['quantity'], data['status'], category_name, current_time, total_price))
-                    order_id = cursor.lastrowid
-
-                    order_items.append({
-                        'id': order_id,
-                        'table_id': data['table_id'],
-                        'menu': item['menu'],
-                        'quantity': item['quantity'],
-                        'status': data['status'],
-                        'category': category_name,
-                        'created_at': current_time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'total_amount': total_price
-                    })
-
-                conn.commit()
-                logging.info(f"Created new orders: {order_items}")
-
-                # Broadcast to connected clients
-                await manager.broadcast({
-                    'action': 'order_update',
-                    'order': order_items  # List of order items
-                })
-
-                return JSONResponse({'success': True})
-            except ValueError as ve:
-                logging.warning(f"Invalid data: {ve}")
-                return JSONResponse({'success': False, 'error': str(ve)}, status_code=400)
-            except Exception as e:
-                logging.error(f"Error creating order: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.put('/api/orders/{order_id}')
-async def edit_order(order_id: int, request: Request):
-    data = await request.json()
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            try:
-                # If menu is being updated, fetch the new price and category
-                if 'menu' in data:
-                    cursor.execute('SELECT price, category FROM menus WHERE name = %s', (data['menu'],))
-                    menu = cursor.fetchone()
-                    if not menu:
-                        return JSONResponse({'success': False, 'error': 'Menu item not found.'}, status_code=400)
-                    price = float(menu['price'])
-                    total_price = price * data.get('quantity', 1)
-                    category_name = menu['category']
-                else:
-                    total_price = data.get('total_amount', 0.00)
-                    category_name = data.get('category', None)
-
-                # Update order
-                cursor.execute('''
-                    UPDATE orders
-                    SET table_id = COALESCE(%s, table_id),
-                        menu = COALESCE(%s, menu),
-                        quantity = COALESCE(%s, quantity),
-                        status = COALESCE(%s, status),
-                        category = COALESCE(%s, category),
-                        total_amount = COALESCE(%s, total_amount)
-                    WHERE id = %s
-                ''', (
-                    data.get('table_id'),
-                    data.get('menu'),
-                    data.get('quantity'),
-                    data.get('status'),
-                    category_name,
-                    total_price,
-                    order_id
-                ))
-                if cursor.rowcount == 0:
-                    return JSONResponse({'success': False, 'error': 'Order not found.'}, status_code=404)
-                conn.commit()
-                logging.info(f"Order {order_id} updated successfully.")
-                return JSONResponse({'success': True})
-            except Exception as e:
-                logging.error(f"Error editing order: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-@app.delete('/api/orders/{order_id}')
-async def delete_order(order_id: int):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute('DELETE FROM orders WHERE id = %s', (order_id,))
-                if cursor.rowcount == 0:
-                    logging.warning(f"Order with id {order_id} not found.")
-                    return JSONResponse({'success': False, 'error': 'Order not found.'}, status_code=404)
-                conn.commit()
-                logging.info(f"Order with id {order_id} deleted successfully.")
-                return JSONResponse({'success': True})
-            except Exception as e:
-                logging.error(f"Error deleting order: {e}", exc_info=True)
-                return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
-# Additional API endpoints remain unchanged
-
-def get_enum_values(table_name: str, column_name: str) -> List[str]:
-    query = """
-        SELECT COLUMN_TYPE
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s
-    """
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query, (db_config['database'], table_name, column_name))
-            result = cursor.fetchone()
-            if not result:
-                return []
-            column_type = result[0]
-            # Extract ENUM values
-            enum_values = column_type.strip("enum()").split(",")
-            enum_values = [val.strip("'") for val in enum_values]
-            return enum_values
+            cursor.execute('''
+                SELECT id, name, price, category
+                FROM menus
+            ''')
+            menus = cursor.fetchall()
+    return jsonify({'status': 'success', 'menus': menus})
 
 if __name__ == '__main__':
-    uvicorn.run(app, host='127.0.0.1', port=5000)
+    socketio.run(app, host='127.0.0.1', port=5000)

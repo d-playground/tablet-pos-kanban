@@ -36,10 +36,6 @@ def index():
 def pos():
     return render_template('pos.html')
 
-@app.route("/order")
-def order():
-    return render_template('order.html')
-
 @app.route("/bar1")
 def bar1():
     return render_template('bar1.html')

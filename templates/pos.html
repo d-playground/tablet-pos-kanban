@@ -1,193 +1,298 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POS 시스템</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <title>POS System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <div class="table-map">
-            <h2>테이블 선택</h2>
-            <div id="table-buttons">
-                <!-- 테이블 버튼이 동적으로 삽입됩니다 -->
-                <p>로딩 중...</p>
-            </div>
-        </div>
-        <div class="pos-interface">
-            <h2>POS </h2>
-            <div class="category-section">
-                <h3>카테고리</h3>
-                <div class="category-buttons" id="category-buttons">
-                    <!-- 카테고리 버튼이 동적으로 삽입됩니다 -->
-                </div>
-            </div>
-            <div class="menu-section">
-                <h3>메뉴</h3>
-                <div class="menu-buttons" id="menu-buttons">
-                    <!-- 메뉴 버튼이 동적으로 삽입됩니다 -->
-                </div>
-            </div>
-            <div class="order-summary">
-                <h3>주문 내역</h3>
-                <div id="selected-items">
-                    <p>주문된 항목이 없습니다.</p>
-                </div>
-                <div class="total-section">
-                    <div>총계: ₩<span id="total-amount">0</span></div>
-                </div>
-                <button class="submit-btn" onclick="submitOrder()">주문 제출</button>
-            </div>
-        </div>
-    </div>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">홈</a></li>
+                <li><a href="/pos">POS</a></li>
+                <li><a href="/tickets">주문 현황판</a></li>
+                <li><a href="/setup/menus">메뉴 관리</a></li>
+                <li><a href="/setup/tables">테이블 관리</a></li>
+            </ul>
+        </nav>
+    </header>
 
+    <main class="pos-container">
+        <section class="tables-container">
+            <h2>Tables</h2>
+            <div id="tables">
+                {% for table in tables %}
+                    <button class="table" 
+                            data-table-id="{{ table.id }}" 
+                            data-table-name="{{ table.name }}"
+                            data-table='{{ table|tojson|safe }}'>
+                        {{ table.name }}
+                    </button>
+                {% endfor %}
+            </div>
+        </section>
+        
+        <section class="menu-container">
+            <h2>Menu</h2>
+            <div id="menu-categories">
+                <button class="menu-category-btn active" data-category="popular">Popular Items</button>
+                {% for category in categories %}
+                    <button class="menu-category-btn" data-category="{{ category }}">{{ category }}</button>
+                {% endfor %}
+            </div>
+            <div id="menu">
+                {% for item in menus|sort(attribute='name') %}
+                    <div class="menu-item" data-category="{{ item.category }}" data-popular="{{ item.popular|default(false)|string|lower }}">
+                        <span class="menu-item-name">{{ item.name }}</span>
+                        <span class="menu-item-price">${{ item.price|round(2, 'floor') }}</span>
+                        <button class="add-to-order-btn" 
+                                data-item='{"id": {{ item.id }}, "name": "{{ item.name }}", "price": {{ item.price }}}'>
+                            Add
+                        </button>
+                    </div>
+                {% endfor %}
+            </div>
+        </section>
+        
+        <section class="order-container">
+            <h2>Current Order</h2>
+            <p>Table: <span id="selected-table"></span></p>
+            
+            <table id="order-items">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Subtotal</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Order items will be dynamically added here -->
+                </tbody>
+            </table>
+            
+            <p class="order-total">Total: $<span id="order-total">0.00</span></p>
+            
+            <button id="submit-order-btn">Submit Order</button>
+        </section>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.min.js"></script>
     <script>
-        var selectedTable = null;
-        var selectedCategory = null;
-        var selectedItems = [];
-        var menus = [];
-        var categories = [];
-
-        // 테이블 목록 로드
-        fetch('/get_tables')
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    var tableButtons = document.getElementById('table-buttons');
-                    tableButtons.innerHTML = '';
-                    data.tables.forEach(function(table) {
-                        var btn = document.createElement('button');
-                        btn.textContent = `${table.name}`;
-                        btn.onclick = function() {
-                            selectedTable = table.id;
-                            // 선택된 테이블 시각적으로 표시 (선택 상태 관리)
-                            var buttons = tableButtons.getElementsByTagName('button');
-                            for (var i = 0; i < buttons.length; i++) {
-                                buttons[i].classList.remove('selected');
-                            }
-                            btn.classList.add('selected');
-                        };
-                        tableButtons.appendChild(btn);
-                    });
-                }
+        const socket = io();
+        
+        let selectedTable = null;
+        
+        function selectTable(tableData) {
+            console.log('Selecting table:', tableData);
+            selectedTable = tableData;
+            document.getElementById('selected-table').textContent = tableData.name;
+            
+            // Update visual feedback
+            document.querySelectorAll('.table').forEach(btn => {
+                btn.classList.remove('selected');
             });
-
-        // 메뉴 목록 로드
-        fetch('/get_menus')
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    menus = data.menus;
-                    categories = [...new Set(menus.map(menu => menu.category))];
-                    loadCategories();
-                }
-            });
-
-        function loadCategories() {
-            var categoryButtons = document.getElementById('category-buttons');
-            categoryButtons.innerHTML = '';
-            categories.forEach(function(category) {
-                var btn = document.createElement('button');
-                btn.textContent = category;
-                btn.onclick = function() {
-                    selectedCategory = category;
-                    loadMenus();
-                    // 시각적 피드백 추가 (선택 상태 관리)
-                    var buttons = categoryButtons.getElementsByTagName('button');
-                    for (var i = 0; i < buttons.length; i++) {
-                        buttons[i].classList.remove('selected');
-                    }
-                    btn.classList.add('selected');
-                };
-                categoryButtons.appendChild(btn);
-            });
+            document.querySelector(`.table[data-table-id="${tableData.id}"]`).classList.add('selected');
         }
-
-        function loadMenus() {
-            var menuButtons = document.getElementById('menu-buttons');
-            menuButtons.innerHTML = '';
-            menus.filter(menu => menu.category === selectedCategory).forEach(function(menu) {
-                var btn = document.createElement('button');
-                btn.textContent = `${menu.name} - ₩${menu.price}`;
-                btn.onclick = function() {
-                    addToOrder(menu);
-                };
-                menuButtons.appendChild(btn);
-            });
-        }
-
-        function addToOrder(menu) {
-            var existingItem = selectedItems.find(item => item.menu_id === menu.id);
+        
+        const orderItems = [];
+        
+        function addToOrder(item) {
+            if (!item || !item.id) {
+                console.error('Invalid item data:', item);
+                return;
+            }
+            
+            console.log('Adding item to order:', item);
+            
+            const existingItem = orderItems.find(i => i.id === item.id);
             if (existingItem) {
-                existingItem.quantity += 1;
+                console.log('Increasing quantity for existing item:', existingItem);
+                existingItem.quantity++;
             } else {
-                selectedItems.push({
-                    menu_id: menu.id,
-                    menu_name: menu.name,
-                    price: parseFloat(menu.price),
+                console.log('Adding new item to order:', item);
+                orderItems.push({
+                    id: item.id,
+                    name: item.name,
+                    price: parseFloat(item.price),
                     quantity: 1
                 });
             }
-            updateOrderSummary();
+            
+            console.log('Updated orderItems:', orderItems);
+            renderOrder();
         }
-
-        function updateOrderSummary() {
-            var selectedItemsDiv = document.getElementById('selected-items');
-            selectedItemsDiv.innerHTML = '';
-            var totalAmount = 0;
-            selectedItems.forEach(function(item) {
-                var itemDiv = document.createElement('div');
-                itemDiv.textContent = `${item.menu_name} x ${item.quantity} - ₩${item.price * item.quantity}`;
-                selectedItemsDiv.appendChild(itemDiv);
-                totalAmount += item.price * item.quantity;
+        
+        function removeFromOrder(index) {
+            orderItems.splice(index, 1);
+            renderOrder();
+        }
+        
+        function renderOrder() {
+            const orderItemsTable = document.getElementById('order-items');
+            const orderTotalSpan = document.getElementById('order-total');
+            
+            let total = 0;
+            
+            // Clear existing rows
+            orderItemsTable.querySelector('tbody').innerHTML = '';
+            
+            // Add order item rows
+            orderItems.forEach((item, index) => {
+                const row = document.createElement('tr');
+                
+                const nameCell = document.createElement('td');
+                nameCell.textContent = item.name;
+                row.appendChild(nameCell);
+                
+                const quantityCell = document.createElement('td');
+                quantityCell.textContent = item.quantity;
+                row.appendChild(quantityCell);
+                
+                const priceCell = document.createElement('td');
+                priceCell.textContent = '$' + item.price.toFixed(2);
+                row.appendChild(priceCell);
+                
+                const subtotalCell = document.createElement('td');
+                const subtotal = item.price * item.quantity;
+                subtotalCell.textContent = '$' + subtotal.toFixed(2);
+                row.appendChild(subtotalCell);
+                
+                const removeCell = document.createElement('td');
+                const removeButton = document.createElement('button');
+                removeButton.textContent = 'X';
+                removeButton.classList.add('remove-item-btn');
+                removeButton.addEventListener('click', () => removeFromOrder(index));
+                removeCell.appendChild(removeButton);
+                row.appendChild(removeCell);
+                
+                orderItemsTable.querySelector('tbody').appendChild(row);
+                
+                total += subtotal;
             });
-            document.getElementById('total-amount').textContent = totalAmount.toLocaleString();
+            
+            orderTotalSpan.textContent = total.toFixed(2);
         }
-
-        function submitOrder() {
+        
+        document.getElementById('submit-order-btn').addEventListener('click', () => {
             if (!selectedTable) {
-                alert('테이블을 선택해주세요.');
+                alert('Please select a table first');
                 return;
             }
-            if (selectedItems.length === 0) {
-                alert('주문 항목을 선택해주세요.');
+            
+            if (orderItems.length === 0) {
+                alert('Please add items to the order first');
                 return;
             }
-            var orderData = {
-                table_id: selectedTable,
-                items: selectedItems.map(item => ({
-                    menu_id: item.menu_id,
+            
+            const payload = {
+                table_id: selectedTable.id,
+                items: orderItems.map(item => ({
+                    menu_id: item.id,
                     quantity: item.quantity
                 }))
             };
-            fetch('/place_order', {
+            
+            fetch('/api/orders', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(orderData)
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    alert('주문이 성공적으로 접수되었습니다.');
-                    // 주문 초기화
-                    selectedItems = [];
-                    updateOrderSummary();
-                    // 시각적 초기화 (선택된 테이블 표시 제거)
-                    var buttons = document.getElementById('table-buttons').getElementsByTagName('button');
-                    for (var i = 0; i < buttons.length; i++) {
-                        buttons[i].classList.remove('selected');
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => Promise.reject(err));
                     }
-                    selectedTable = null;
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        alert('Order submitted successfully');
+                        
+                        // Clear order state
+                        selectedTable = null;
+                        document.getElementById('selected-table').textContent = '';
+                        orderItems.length = 0;
+                        renderOrder();
+                        
+                        // Remove selected class from table
+                        document.querySelectorAll('.table').forEach(btn => {
+                            btn.classList.remove('selected');
+                        });
+                    } else {
+                        throw new Error('Failed to submit order');
+                    }
+                })
+                .catch(err => {
+                    console.error('Error submitting order:', err);
+                    alert(err.message || 'Failed to submit order');
+                });
+        });
+        
+        // Menu category filtering
+        const menuCategoryButtons = document.querySelectorAll('.menu-category-btn');
+        const menuItems = document.querySelectorAll('.menu-item');
+        
+        function filterMenuItems(category) {
+            menuItems.forEach(item => {
+                if (category === 'popular') {
+                    if (item.dataset.popular === 'true') {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
                 } else {
-                    alert('주문 접수에 실패하였습니다. ' + (data.message || ''));
+                    if (item.dataset.category === category) {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
                 }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('주문 접수에 실패하였습니다.');
             });
         }
+        
+        menuCategoryButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const selectedCategory = button.dataset.category;
+                menuCategoryButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                filterMenuItems(selectedCategory);
+            });
+        });
+        
+        // Add to order button functionality
+        const addToOrderButtons = document.querySelectorAll('.add-to-order-btn');
+        console.log('Add to order buttons:', addToOrderButtons);
+        
+        addToOrderButtons.forEach(button => {
+            console.log('Attaching click event to button:', button);
+            button.addEventListener('click', (e) => {
+                console.log('Add button clicked:', button);
+                try {
+                    const itemData = button.dataset.item;
+                    console.log('Raw item data:', itemData);
+                    const item = JSON.parse(itemData);
+                    console.log('Parsed item:', item);
+                    addToOrder(item);
+                } catch (err) {
+                    console.error('Error adding item to order:', err);
+                }
+            });
+        });
+        
+        // Filter popular items by default
+        filterMenuItems('popular');
+        
+        // Add event listeners to table buttons
+        document.querySelectorAll('.table').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const tableData = JSON.parse(button.dataset.table);
+                selectTable(tableData);
+            });
+        });
     </script>
 </body>
 </html>

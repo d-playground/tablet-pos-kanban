@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>메뉴 관리</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">홈</a></li>
+                <li><a href="/pos">POS</a></li>
+                <li><a href="/tickets">주문 현황판</a></li>
+                <li><a href="/setup/menus">메뉴 관리</a></li>
+                <li><a href="/setup/tables">테이블 관리</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <h1>메뉴 관리</h1>
+        
+        <div id="menu-categories">
+            <button class="menu-category-btn active" data-category="all">All Items</button>
+            {% for category in categories %}
+                <button class="menu-category-btn" data-category="{{ category }}">{{ category }}</button>
+            {% endfor %}
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>이름</th>
+                    <th>가격</th>
+                    <th>카테고리</th>
+                    <th>설명</th>
+                    <th>재고여부</th>
+                    <th>작업</th>
+                </tr>
+            </thead>
+            <tbody id="menu-table">
+                <!-- 메뉴 항목이 동적으로 삽입됩니다 -->
+            </tbody>
+        </table>
+        
+        <button id="add-menu-item">메뉴 추가</button>
+        <button id="save-changes">변경 사항 저장</button>
+    </main>
+
+    <script>
+        const menuTable = document.getElementById('menu-table');
+        const addMenuItemButton = document.getElementById('add-menu-item');
+        const saveChangesButton = document.getElementById('save-changes');
+        
+        let menuItems = [];
+        
+        function fetchMenuItems() {
+            fetch('/api/menus')
+                .then(response => response.json())
+                .then(data => {
+                    menuItems = data;
+                    renderMenuItems();
+                });
+        }
+        
+        function renderMenuItems() {
+            menuTable.innerHTML = '';
+            menuItems.forEach((item, index) => {
+                const row = document.createElement('tr');
+                
+                const nameCell = document.createElement('td');
+                nameCell.innerHTML = `<input type="text" value="${item.name}">`;
+                row.appendChild(nameCell);
+                
+                const priceCell = document.createElement('td');
+                priceCell.innerHTML = `<input type="number" value="${item.price}" step="0.01">`;
+                row.appendChild(priceCell);
+                
+                const categoryCell = document.createElement('td');
+                categoryCell.innerHTML = `
+                    <div class="category-input">
+                        <input type="text" list="categories" value="${item.category}">
+                        <datalist id="categories">
+                            {% for category in categories %}
+                                <option value="{{ category }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>`;
+                row.appendChild(categoryCell);
+                
+                const descriptionCell = document.createElement('td');
+                descriptionCell.innerHTML = `<input type="text" value="${item.description || ''}">`;
+                row.appendChild(descriptionCell);
+                
+                const availableCell = document.createElement('td');
+                availableCell.innerHTML = `<input type="checkbox" ${item.is_available ? 'checked' : ''}>`;
+                row.appendChild(availableCell);
+                
+                const actionsCell = document.createElement('td');
+                const deleteButton = document.createElement('button');
+                deleteButton.textContent = '삭제';
+                deleteButton.addEventListener('click', () => deleteMenuItem(index));
+                actionsCell.appendChild(deleteButton);
+                row.appendChild(actionsCell);
+                
+                menuTable.appendChild(row);
+            });
+        }
+        
+        function addMenuItem() {
+            menuItems.push({
+                name: '',
+                price: 0,
+                category: '',
+                description: '',
+                is_available: true
+            });
+            renderMenuItems();
+        }
+        
+        function deleteMenuItem(index) {
+            menuItems.splice(index, 1);
+            renderMenuItems();
+        }
+        
+        function saveChanges() {
+            const updatedItems = [];
+            menuTable.querySelectorAll('tr').forEach((row, index) => {
+                const item = {
+                    id: menuItems[index]?.id,
+                    name: row.cells[0].querySelector('input').value,
+                    price: parseFloat(row.cells[1].querySelector('input').value),
+                    category: row.cells[2].querySelector('input').value,
+                    description: row.cells[3].querySelector('input').value || null,
+                    is_available: row.cells[4].querySelector('input').checked
+                };
+                updatedItems.push(item);
+            });
+            
+            fetch('/api/menus', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatedItems)
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => Promise.reject(err));
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        alert('메뉴가 성공적으로 업데이트되었습니다.');
+                        fetchMenuItems();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error saving menus:', error);
+                    alert('메뉴 업데이트에 실패했습니다: ' + (error.message || '알 수 없는 오류'));
+                });
+        }
+        
+        function filterMenuItems(category) {
+            const rows = menuTable.querySelectorAll('tr');
+            rows.forEach(row => {
+                const categorySelect = row.querySelector('select');
+                if (!categorySelect) return;
+                
+                if (category === 'all' || categorySelect.value === category) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+        
+        document.querySelectorAll('.menu-category-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const selectedCategory = button.dataset.category;
+                document.querySelectorAll('.menu-category-btn').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                filterMenuItems(selectedCategory);
+            });
+        });
+        
+        addMenuItemButton.addEventListener('click', addMenuItem);
+        saveChangesButton.addEventListener('click', saveChanges);
+        
+        fetchMenuItems();
+    </script>
+</body>
+</html>

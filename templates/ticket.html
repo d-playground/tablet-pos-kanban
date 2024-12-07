@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Order Tickets Board</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">홈</a></li>
+                <li><a href="/pos">POS</a></li>
+                <li><a href="/tickets">주문 현황판</a></li>
+                <li><a href="/setup/menus">메뉴 관리</a></li>
+                <li><a href="/setup/tables">테이블 관리</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <h1>Order Tickets Board</h1>
+        <div class="kanban-board">
+            <div class="column" id="pending-orders">
+                <h2>대기 중</h2>
+                <div class="ticket-container"></div>
+            </div>
+            <div class="column" id="in-progress-orders">
+                <h2>진행 중</h2>
+                <div class="ticket-container"></div>
+            </div>
+            <div class="column" id="completed-orders">
+                <h2>완료됨</h2>
+                <div class="ticket-container"></div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        
+        const pendingOrders = document.querySelector('#pending-orders .ticket-container');
+        const inProgressOrders = document.querySelector('#in-progress-orders .ticket-container');
+        const completedOrders = document.querySelector('#completed-orders .ticket-container');
+        
+        // Define status progression
+        const statusProgression = {
+            '대기중': '진행중',
+            '진행중': '완료',
+            '완료': '완료'  // No further progression
+        };
+        
+        function fetchOrders() {
+            fetch('/api/orders')
+                .then(response => response.json())
+                .then(renderOrders)
+                .catch(error => console.error('Error fetching orders:', error));
+        }
+
+        function createTicket(order) {
+            const ticket = document.createElement('div');
+            ticket.classList.add('ticket');
+            ticket.dataset.orderId = order.id;
+            ticket.dataset.status = order.status;
+            
+            // Add ticket content
+            const table = document.createElement('h3');
+            table.textContent = `Table ${order.table_id}`;
+            ticket.appendChild(table);
+            
+            const items = document.createElement('ul');
+            order.items.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = `${item.name} × ${item.quantity}`;
+                items.appendChild(li);
+            });
+            ticket.appendChild(items);
+            
+            const total = document.createElement('p');
+            total.textContent = `Total: $${order.total_amount.toFixed(2)}`;
+            ticket.appendChild(total);
+
+            // Add status indicator
+            const status = document.createElement('div');
+            status.classList.add('status-indicator');
+            status.textContent = order.status;
+            ticket.appendChild(status);
+
+            // Add touch event handlers
+            let touchStartX = 0;
+            let touchEndX = 0;
+            let isLongPress = false;
+            let longPressTimer;
+
+            ticket.addEventListener('touchstart', (e) => {
+                touchStartX = e.touches[0].clientX;
+                isLongPress = false;
+                longPressTimer = setTimeout(() => {
+                    isLongPress = true;
+                    if (confirm('주문을 취소하시겠습니까?')) {
+                        updateOrderStatus(order.id, '취소');
+                    }
+                }, 500);
+            });
+
+            ticket.addEventListener('touchmove', (e) => {
+                clearTimeout(longPressTimer);
+                touchEndX = e.touches[0].clientX;
+                const diffX = touchEndX - touchStartX;
+                
+                if (Math.abs(diffX) > 20) {
+                    ticket.style.transform = `translateX(${diffX * 0.5}px)`;
+                }
+            });
+
+            ticket.addEventListener('touchend', (e) => {
+                clearTimeout(longPressTimer);
+                if (isLongPress) return;
+
+                const diffX = touchEndX - touchStartX;
+                const SWIPE_THRESHOLD = 100;
+                
+                if (Math.abs(diffX) >= SWIPE_THRESHOLD) {
+                    const direction = diffX > 0 ? 'right' : 'left';
+                    handleSwipe(ticket, direction);
+                } else {
+                    ticket.style.transform = '';
+                }
+            });
+
+            // Add click handler for desktop
+            ticket.addEventListener('click', () => {
+                const nextStatus = statusProgression[order.status];
+                if (nextStatus && nextStatus !== order.status) {
+                    updateOrderStatus(order.id, nextStatus);
+                }
+            });
+
+            return ticket;
+        }
+
+        function renderOrders(orders) {
+            // Clear existing tickets but keep headers
+            pendingOrders.innerHTML = '';
+            inProgressOrders.innerHTML = '';
+            completedOrders.innerHTML = '';
+            
+            orders.forEach(order => {
+                const ticket = createTicket(order);
+                
+                switch (order.status) {
+                    case '대기중':
+                        pendingOrders.appendChild(ticket);
+                        break;
+                    case '진행중':
+                        inProgressOrders.appendChild(ticket);
+                        break;
+                    case '완료':
+                        completedOrders.appendChild(ticket);
+                        break;
+                }
+            });
+        }
+
+        function handleSwipe(ticket, direction) {
+            const currentStatus = ticket.dataset.status;
+            let newStatus;
+
+            if (direction === 'left') {
+                newStatus = statusProgression[currentStatus];
+            } else if (direction === 'right' && currentStatus !== '대기중') {
+                newStatus = Object.entries(statusProgression).find(([key, value]) => value === currentStatus)?.[0];
+            }
+
+            if (newStatus && newStatus !== currentStatus) {
+                ticket.classList.add('swiping');
+                if (direction === 'left') {
+                    ticket.classList.add('swipe-next');
+                } else {
+                    ticket.style.transform = 'translateX(100%)';
+                }
+
+                setTimeout(() => {
+                    updateOrderStatus(ticket.dataset.orderId, newStatus);
+                    ticket.classList.remove('swiping');
+                    ticket.classList.remove('swipe-next');
+                    ticket.style.transform = '';
+                }, 300);
+            }
+        }
+        
+        function updateOrderStatus(orderId, newStatus) {
+            fetch(`/api/orders/${orderId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ status: newStatus })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        socket.emit('update_order_status', { order_id: orderId, status: newStatus });
+                    }
+                })
+                .catch(error => console.error('Error updating order status:', error));
+        }
+        
+        socket.on('order_status_updated', () => {
+            fetchOrders();
+        });
+        
+        socket.on('new_order', () => {
+            fetchOrders();
+        });
+
+        // Initial load
+        fetchOrders();
+    </script>
+</body>
+</html>

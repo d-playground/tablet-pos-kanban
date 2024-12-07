@@ -1,253 +1,460 @@
+"""
+POS Backend API
+---------------
+
+This module provides the backend API for the POS system.
+It handles database operations, API routes, and WebSocket events.
+"""
+
+import os
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
+from marshmallow import Schema, fields, validate, ValidationError
 import mysql.connector
 from mysql.connector import pooling
-from datetime import datetime
 
-# 데이터베이스 설정
+# Load environment variables
+DB_HOST = os.environ.get('DB_HOST', 'localhost')
+DB_USER = os.environ.get('DB_USER', 'pos_user')
+DB_PASSWORD = os.environ.get('DB_PASSWORD', '1234')
+DB_NAME = os.environ.get('DB_NAME', 'pos')
+
+# Database configuration
 db_config = {
-    'host': 'localhost',
-    'user': 'user1',
-    'password': '1234',
-    'database': 'pos',
+    'host': DB_HOST,
+    'user': DB_USER,
+    'password': DB_PASSWORD,
+    'database': DB_NAME,
     'charset': 'utf8mb4',
     'collation': 'utf8mb4_general_ci'
 }
 
-# 데이터베이스 연결 풀 생성
+# Create a database connection pool
 db_pool = mysql.connector.pooling.MySQLConnectionPool(
     pool_name="pos_pool",
     pool_size=5,
     **db_config
 )
 
-def get_db():
+app = Flask(__name__)
+socketio = SocketIO(app)
+
+# Custom exception classes
+class InvalidUsage(Exception):
+    status_code = 400
+
+    def __init__(self, message, status_code=None, payload=None):
+        super().__init__(self)
+        self.message = message
+        if status_code is not None:
+            self.status_code = status_code
+        self.payload = payload
+
+    def to_dict(self):
+        rv = dict(self.payload or ())
+        rv['message'] = self.message
+        return rv
+
+# Marshmallow schemas for input validation
+class TableSchema(Schema):
+    id = fields.Int(allow_none=True)
+    name = fields.Str(required=True)
+    status = fields.Str(required=True, validate=validate.OneOf(['available', 'occupied']))
+
+class MenuSchema(Schema):
+    id = fields.Int(allow_none=True)
+    name = fields.Str(required=True)
+    price = fields.Decimal(required=True, validate=validate.Range(min=0))
+    category = fields.Str(required=True)
+    description = fields.Str(allow_none=True)
+    is_available = fields.Bool(required=True)
+
+class OrderItemSchema(Schema):
+    menu_id = fields.Int(required=True)
+    quantity = fields.Int(required=True, validate=validate.Range(min=1))
+    notes = fields.Str(allow_none=True)
+
+class OrderSchema(Schema):
+    table_id = fields.Int(required=True)
+    items = fields.List(fields.Nested(OrderItemSchema), required=True)
+
+table_schema = TableSchema()
+menu_schema = MenuSchema()
+order_schema = OrderSchema()
+
+# Utility functions
+def get_db_connection():
+    """Get a database connection from the pool."""
     return db_pool.get_connection()
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+def close_db_connection(conn):
+    """Close the database connection."""
+    conn.close()
 
-# 라우트 정의
-@app.route("/")
+def commit_and_close(conn):
+    """Commit changes and close the database connection."""
+    conn.commit()
+    close_db_connection(conn)
+
+# Route handlers
+@app.route('/')
 def index():
+    """Render the index page."""
     return render_template('index.html')
 
-@app.route("/pos")
+@app.route('/pos')
 def pos():
-    return render_template('pos.html')
-
-@app.route("/bar1")
-def bar1():
-    return render_template('bar1.html')
-
-@app.route("/bar2")
-def bar2():
-    return render_template('bar2.html')
-
-@app.route("/kitchen")
-def kitchen():
-    return render_template('kitchen.html')
-
-@app.route("/table-map")
-def table_map():
-    return render_template('table_map.html')
-
-@app.route("/menu")
-def menu():
-    # 메뉴 가져오기
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            cursor.execute('''
-                SELECT id, name, price, category
-                FROM menus
-            ''')
-            menus = cursor.fetchall()
-
-    # 카테고리 가져오기
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute('SELECT DISTINCT category FROM menus')
-            categories_records = cursor.fetchall()
-            categories = [record[0] for record in categories_records]
-
-    return render_template('menu.html', menus=menus, categories=categories)
-
-# 테이블 목록 가져오기
-@app.route("/get_tables")
-def get_tables():
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            cursor.execute('SELECT id, name FROM tables')
-            tables = cursor.fetchall()
-    return jsonify({'status': 'success', 'tables': tables})
-
-# 테이블 맵 관리 (테이블 추가/수정/삭제)
-@app.route("/manage_tables", methods=['POST'])
-def manage_tables():
-    data = request.get_json()
-    tables = data.get('tables')  # [{id, name, action}, ...]
-
-    conn = get_db()
-    cursor = conn.cursor()
+    """Render the POS page with tables and menus data."""
     try:
-        for table in tables:
-            action = table.get('action')
-            table_id = table.get('id')
-            if action == 'add':
-                cursor.execute("""
-                    INSERT INTO tables (name) VALUES (%s)
-                """, (table['name'],))
-            elif action == 'update':
-                if not table_id:
-                    raise ValueError("테이블 ID가 필요합니다.")
-                cursor.execute("""
-                    UPDATE tables SET name=%s WHERE id=%s
-                """, (table['name'], table_id))
-            elif action == 'delete':
-                if not table_id:
-                    # id가 없으면 삭제 시도를 생략
-                    continue
-                cursor.execute("""
-                    DELETE FROM tables WHERE id=%s
-                """, (table_id,))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print(e)
-        return jsonify({'status': 'error', 'message': str(e)})
-    finally:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("SELECT id, name, status FROM tables")
+        tables = cursor.fetchall()
+        
+        cursor.execute("SELECT id, name, price, category, description, is_available FROM menus")
+        menus = cursor.fetchall()
+        
+        cursor.execute("SELECT DISTINCT category FROM menus")
+        categories = [row['category'] for row in cursor.fetchall() if row['category'] is not None]
+        
         cursor.close()
-        conn.close()
-    return jsonify({'status': 'success'})
+        close_db_connection(conn)
+        
+        return render_template('pos.html', tables=tables, menus=menus, categories=categories)
+    except Exception as e:
+        app.logger.error(f"Error fetching POS data: {str(e)}")
+        raise InvalidUsage('Failed to fetch POS data', status_code=500)
 
-# 주문 생성
-@app.route("/place_order", methods=['POST'])
-def place_order():
-    data = request.get_json()
-    table_id = data.get('table_id')
-    items = data.get('items')  # [{'menu_id': ..., 'quantity': ...}, ...]
+@app.route('/tickets')
+def tickets():
+    """Render the order tickets page."""
+    return render_template('ticket.html')
 
-    conn = get_db()
-    cursor = conn.cursor()
+@app.route('/setup/menus')
+def setup_menus():
+    """Render the menu setup page."""
+    return render_template('setup_menu.html')
+
+@app.route('/setup/tables')
+def setup_tables():
+    """Render the table setup page."""
+    return render_template('setup_table.html')
+
+@app.route('/api/tables')
+def get_tables():
+    """Get all tables."""
     try:
-        # 새로운 주문 생성
-        cursor.execute("""
-            INSERT INTO orders (table_id, status, created_at)
-            VALUES (%s, %s, %s)
-        """, (table_id, 'pending', datetime.now()))
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, name, status FROM tables")
+        tables = cursor.fetchall()
+        cursor.close()
+        close_db_connection(conn)
+        return jsonify(tables)
+    except Exception as e:
+        app.logger.error(f"Error fetching tables: {str(e)}")
+        raise InvalidUsage('Failed to fetch tables', status_code=500)
+
+@app.route('/api/tables', methods=['PUT'])
+def update_tables():
+    """Update tables data."""
+    try:
+        data = request.get_json()
+        if not isinstance(data, list):
+            raise InvalidUsage('Invalid input: expected array of tables')
+        
+        # Validate input
+        tables = table_schema.load(data, many=True)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for table in tables:
+            table_id = table.get('id')
+            table_name = table.get('name')
+            table_status = table.get('status')
+            
+            if table_id:
+                # Update existing table
+                cursor.execute("""
+                    UPDATE tables 
+                    SET name = %s, status = %s 
+                    WHERE id = %s
+                """, (table_name, table_status, table_id))
+            else:
+                # Insert new table
+                cursor.execute("""
+                    INSERT INTO tables (name, status) 
+                    VALUES (%s, %s)
+                """, (table_name, table_status))
+        
+        commit_and_close(conn)
+        
+        return jsonify({'success': True})
+    except ValidationError as ve:
+        app.logger.error(f"Validation error: {str(ve)}")
+        raise InvalidUsage({'validation_errors': ve.messages}, status_code=400)
+    except Exception as e:
+        app.logger.error(f"Error updating tables: {str(e)}")
+        if 'conn' in locals():
+            conn.rollback()
+            close_db_connection(conn)
+        raise InvalidUsage('Failed to update tables', status_code=500)
+
+@app.route('/api/menus')
+def get_menus():
+    """Get all menus."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, name, price, category, description, is_available FROM menus")
+        menus = cursor.fetchall()
+        cursor.close()
+        close_db_connection(conn)
+        return jsonify(menus)
+    except Exception as e:
+        app.logger.error(f"Error fetching menus: {str(e)}")
+        raise InvalidUsage('Failed to fetch menus', status_code=500)
+
+@app.route('/api/menus', methods=['PUT'])
+def update_menus():
+    """Update menus data."""
+    try:
+        data = request.get_json()
+        if not isinstance(data, list):
+            raise InvalidUsage('Invalid input: expected array of menu items')
+        
+        # Validate input
+        menus = menu_schema.load(data, many=True)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for menu in menus:
+            menu_id = menu.get('id')
+            menu_name = menu.get('name')
+            menu_price = menu.get('price')
+            menu_category = menu.get('category')
+            menu_description = menu.get('description')
+            menu_is_available = menu.get('is_available')
+            
+            if menu_id:
+                # Update existing menu
+                cursor.execute("""
+                    UPDATE menus 
+                    SET name = %s, price = %s, category = %s, description = %s, is_available = %s
+                    WHERE id = %s
+                """, (menu_name, menu_price, menu_category, menu_description, menu_is_available, menu_id))
+            else:
+                # Insert new menu
+                cursor.execute("""
+                    INSERT INTO menus (name, price, category, description, is_available)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (menu_name, menu_price, menu_category, menu_description, menu_is_available))
+        
+        commit_and_close(conn)
+        
+        return jsonify({'success': True})
+    except ValidationError as ve:
+        app.logger.error(f"Validation error: {str(ve)}")
+        raise InvalidUsage({'validation_errors': ve.messages}, status_code=400)
+    except Exception as e:
+        app.logger.error(f"Error updating menus: {str(e)}")
+        if 'conn' in locals():
+            conn.rollback()
+            close_db_connection(conn)
+        raise InvalidUsage('Failed to update menus', status_code=500)
+
+@app.route('/api/orders', methods=['POST'])
+def create_order():
+    """Create a new order."""
+    try:
+        data = request.get_json()
+        
+        # Validate input
+        order_data = order_schema.load(data)
+        
+        table_id = order_data['table_id']
+        items = order_data['items']
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Insert order with initial total of 0
+        cursor.execute(
+            "INSERT INTO orders (table_id, status, total_amount) VALUES (%s, '대기중', 0)", 
+            (table_id,)
+        )
         order_id = cursor.lastrowid
 
-        # 주문 아이템 추가
+        # Insert order items and calculate total
+        total_amount = 0
         for item in items:
-            menu_id = item['menu_id']
+            # Get menu item price
+            cursor.execute(
+                "SELECT price FROM menus WHERE id = %s",
+                (item['menu_id'],)
+            )
+            menu_item = cursor.fetchone()
+            if not menu_item:
+                raise InvalidUsage(f"Menu item {item['menu_id']} not found")
+
+            unit_price = menu_item['price']
             quantity = item['quantity']
+            subtotal = unit_price * quantity
+            total_amount += subtotal
+
+            # Insert order item
             cursor.execute("""
-                INSERT INTO order_items (order_id, menu_id, quantity)
-                VALUES (%s, %s, %s)
-            """, (order_id, menu_id, quantity))
+                INSERT INTO order_items (order_id, menu_id, quantity, unit_price)
+                VALUES (%s, %s, %s, %s)
+            """, (order_id, item['menu_id'], quantity, unit_price))
+
+        # Update order total
+        cursor.execute(
+            "UPDATE orders SET total_amount = %s WHERE id = %s",
+            (total_amount, order_id)
+        )
+
         conn.commit()
+        close_db_connection(conn)
+
+        # Emit socket event to update tickets
+        socketio.emit('new_order', {'order_id': order_id})
+
+        return jsonify({'order_id': order_id, 'success': True}), 201
+
+    except ValidationError as ve:
+        app.logger.error(f"Validation error: {str(ve)}")
+        raise InvalidUsage(ve.messages, status_code=400)
     except Exception as e:
-        conn.rollback()
-        print(e)
-        return jsonify({'status': 'error', 'message': str(e)})
-    finally:
+        app.logger.error(f"Error creating order: {str(e)}")
+        if 'conn' in locals():
+            conn.rollback()
+            close_db_connection(conn)
+        raise InvalidUsage('Failed to create order', status_code=500)
+
+@app.route('/api/orders/<int:order_id>', methods=['PUT'])
+def update_order_status(order_id):
+    """Update the status of an order."""
+    try:
+        data = request.get_json()
+        status = data['status']
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET status = %s WHERE id = %s", (status, order_id))
+        commit_and_close(conn)
+
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.error(f"Error updating order status: {str(e)}")
+        raise InvalidUsage('Failed to update order status', status_code=500)
+
+@app.route('/api/sales')
+def get_sales_data():
+    """Get sales data."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM daily_sales")
+        daily_sales = cursor.fetchall()
+        cursor.execute("SELECT * FROM popular_items")
+        popular_items = cursor.fetchall()
         cursor.close()
-        conn.close()
+        close_db_connection(conn)
+        return jsonify({
+            'daily_sales': daily_sales,
+            'popular_items': popular_items
+        })
+    except Exception as e:
+        app.logger.error(f"Error fetching sales data: {str(e)}")
+        raise InvalidUsage('Failed to fetch sales data', status_code=500)
 
-    # 새로운 주문이 생성되었음을 모든 클라이언트에게 알림
+@app.route('/api/orders')
+def get_orders():
+    """Get all active orders."""
     try:
-        socketio.emit('new_order', {'order_id': order_id}, broadcast=True)
-    except TypeError as te:
-        print(f"Emit failed: {te}")
-        # 대안: Namespace를 명시하거나, 다른 방법으로 브로드캐스트
-        socketio.emit('new_order', {'order_id': order_id}, broadcast=True, namespace='/')
-
-    return jsonify({'status': 'success', 'order_id': order_id})
-
-# 주문 상태 업데이트
-@app.route("/update_order_status", methods=['POST'])
-def update_order_status():
-    data = request.get_json()
-    order_id = data.get('order_id')
-    status = data.get('status')
-
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get orders with their items
         cursor.execute("""
-            UPDATE orders SET status=%s WHERE id=%s
-        """, (status, order_id))
-        conn.commit()
+            SELECT o.id, o.table_id, o.status, o.total_amount, o.created_at,
+                   oi.menu_id, oi.quantity, m.name as item_name
+            FROM orders o
+            LEFT JOIN order_items oi ON o.id = oi.order_id
+            LEFT JOIN menus m ON oi.menu_id = m.id
+            WHERE o.status != '취소'
+            ORDER BY o.created_at DESC
+        """)
+        
+        rows = cursor.fetchall()
+        close_db_connection(conn)
+        
+        # Group items by order
+        orders = {}
+        for row in rows:
+            order_id = row['id']
+            if order_id not in orders:
+                orders[order_id] = {
+                    'id': order_id,
+                    'table_id': row['table_id'],
+                    'status': row['status'],
+                    'total_amount': float(row['total_amount']),
+                    'created_at': row['created_at'].isoformat(),
+                    'items': []
+                }
+            
+            if row['menu_id']:  # Check if there are items
+                orders[order_id]['items'].append({
+                    'menu_id': row['menu_id'],
+                    'name': row['item_name'],
+                    'quantity': row['quantity']
+                })
+        
+        return jsonify(list(orders.values()))
+        
     except Exception as e:
-        conn.rollback()
-        print(e)
-        return jsonify({'status': 'error', 'message': str(e)})
-    finally:
-        cursor.close()
-        conn.close()
+        app.logger.error(f"Error fetching orders: {str(e)}")
+        raise InvalidUsage('Failed to fetch orders', status_code=500)
 
-    # 주문 상태 변경 알림
-    try:
-        socketio.emit('order_status_update', {'order_id': order_id, 'status': status}, broadcast=True)
-    except TypeError as te:
-        print(f"Emit failed: {te}")
-        socketio.emit('order_status_update', {'order_id': order_id, 'status': status}, broadcast=True, namespace='/')
-
-    return jsonify({'status': 'success'})
-
-# 메뉴 관리 (메뉴 추가/수정/삭제)
-@app.route("/manage_menus", methods=['POST'])
-def manage_menus():
-    data = request.get_json()
-    menus = data.get('menus')  # [{id, name, price, category, action}, ...]
-
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        for menu in menus:
-            action = menu.get('action')
-            if action == 'add':
-                cursor.execute("""
-                    INSERT INTO menus (name, price, category)
-                    VALUES (%s, %s, %s)
-                """, (menu['name'], menu['price'], menu['category']))
-            elif action == 'update':
-                cursor.execute("""
-                    UPDATE menus SET name=%s, price=%s, category=%s WHERE id=%s
-                """, (menu['name'], menu['price'], menu['category'], menu['id']))
-            elif action == 'delete':
-                cursor.execute("""
-                    DELETE FROM menus WHERE id=%s
-                """, (menu['id'],))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print(e)
-        return jsonify({'status': 'error', 'message': str(e)})
-    finally:
-        cursor.close()
-        conn.close()
-    return jsonify({'status': 'success'})
-
-# SocketIO 이벤트 핸들러
+# SocketIO event handlers
 @socketio.on('connect')
 def handle_connect():
-    print('Client connected:', request.sid)
+    """Handle client connection event."""
+    print('Client connected')
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print('Client disconnected:', request.sid)
+    """Handle client disconnection event."""
+    print('Client disconnected')
 
-@app.route("/get_menus")
-def get_menus():
-    with get_db() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-            cursor.execute('''
-                SELECT id, name, price, category
-                FROM menus
-            ''')
-            menus = cursor.fetchall()
-    return jsonify({'status': 'success', 'menus': menus})
+@socketio.on('update_order_status')
+def handle_update_order_status(data):
+    """Handle update order status event."""
+    try:
+        order_id = data['order_id']
+        status = data['status']
+        # Update in database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET status = %s WHERE id = %s", (status, order_id))
+        commit_and_close(conn)
+        # Broadcast update to all clients
+        emit('order_status_updated', {'order_id': order_id, 'status': status}, broadcast=True)
+    except Exception as e:
+        app.logger.error(f"Error updating order status via WebSocket: {str(e)}")
+
+# Error handlers
+@app.errorhandler(InvalidUsage)
+def handle_invalid_usage(error):
+    """Handle InvalidUsage exceptions."""
+    response = jsonify(error.to_dict())
+    response.status_code = error.status_code
+    return response
 
 if __name__ == '__main__':
-    socketio.run(app, host='127.0.0.1', port=5000)
+    socketio.run(app, host='0.0.0.0', port=5000)

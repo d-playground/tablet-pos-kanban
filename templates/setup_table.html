@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Table Setup</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">홈</a></li>
+                <li><a href="/pos">POS</a></li>
+                <li><a href="/tickets">주문 현황판</a></li>
+                <li><a href="/setup/menus">메뉴 관리</a></li>
+                <li><a href="/setup/tables">테이블 관리</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container">
+        <h1>Table Setup</h1>
+
+        <div id="table-grid">
+            {% for table in tables %}
+                <div class="table" data-table-id="{{ table.id }}">
+                    {{ table.name }}
+                    <button class="edit-table-btn">Edit</button>
+                    <button class="delete-table-btn">X</button>
+                </div>
+            {% endfor %}
+        </div>
+
+        <form id="table-form">
+            <input type="hidden" id="table-id" value="">
+            <label for="table-name">Table Name:</label>
+            <input type="text" id="table-name" required>
+            <button type="submit" id="save-table-btn">Add Table</button>
+        </form>
+    </main>
+
+    <script>
+        const tableGrid = document.getElementById('table-grid');
+        const tableForm = document.getElementById('table-form');
+        const tableIdInput = document.getElementById('table-id');
+        const tableNameInput = document.getElementById('table-name');
+        const saveTableButton = document.getElementById('save-table-btn');
+
+        // Edit table
+        tableGrid.addEventListener('click', (event) => {
+            if (event.target.classList.contains('edit-table-btn')) {
+                const tableElement = event.target.closest('.table');
+                const tableId = tableElement.dataset.tableId;
+                const tableName = tableElement.textContent.trim();
+
+                tableIdInput.value = tableId;
+                tableNameInput.value = tableName;
+                saveTableButton.textContent = 'Save Table';
+            }
+        });
+
+        // Delete table
+        tableGrid.addEventListener('click', (event) => {
+            if (event.target.classList.contains('delete-table-btn')) {
+                const tableElement = event.target.closest('.table');
+                const tableId = tableElement.dataset.tableId;
+
+                fetch(`/api/tables/${tableId}`, {
+                    method: 'DELETE'
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        tableElement.remove();
+                    })
+                    .catch(error => {
+                        console.error('Error deleting table:', error);
+                    });
+            }
+        });
+
+        // Add/Update table
+        tableForm.addEventListener('submit', saveTable);
+
+        function saveTable(event) {
+            event.preventDefault();
+
+            const tableId = tableIdInput.value;
+            const tableName = tableNameInput.value;
+
+            const tableData = {
+                id: tableId || null,  // Include ID if it exists
+                name: tableName,
+                status: 'available'  // Default status for new tables
+            };
+
+            fetch('/api/tables', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify([tableData])  // Send as array since API expects array
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => Promise.reject(err));
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        alert('테이블이 성공적으로 저장되었습니다.');
+                        location.reload();  // Refresh the page to show updates
+                    }
+                })
+                .catch(error => {
+                    console.error('Error saving table:', error);
+                    alert('테이블 저장에 실패했습니다: ' + (error.message || '알 수 없는 오류'));
+                });
+        }
+    </script>
+</body>
+</html>

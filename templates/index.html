@@ -2,17 +2,52 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>홈</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>POS 시스템</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="center">
-        <button onclick="location.href='/pos'">POS 페이지</button>
-        <button onclick="location.href='/bar1'">Bar1 페이지</button>
-        <button onclick="location.href='/kitchen'">주방 페이지</button>
-        <button onclick="location.href='/menu'">메뉴 관리</button>
-        <button onclick="location.href='/table-map'">테이블 맵 관리</button>
-        <button onclick="location.href='/order'">주문 관리</button>
-    </div>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">홈</a></li>
+                <li><a href="/pos">POS</a></li>
+                <li><a href="/tickets">주문 현황판</a></li>
+                <li><a href="/setup/menus">메뉴 관리</a></li>
+                <li><a href="/setup/tables">테이블 관리</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero">
+            <h1>POS 시스템에 오신 것을 환영합니다!</h1>
+            <p>효율적인 주문 관리와 매출 증대를 위한 최고의 선택</p>
+        </section>
+
+        <section class="features">
+            <div class="feature">
+                <h2>간편한 주문 관리</h2>
+                <p>직관적인 인터페이스로 주문을 빠르고 정확하게 처리할 수 있습니다.</p>
+            </div>
+            <div class="feature">
+                <h2>실시간 주문 현황</h2>
+                <p>주방과 연동된 실시간 주문 현황으로 업무 효율을 높일 수 있습니다.</p>
+            </div>
+            <div class="feature">
+                <h2>매출 분석 및 보고</h2>
+                <p>상세한 매출 데이터와 분석 도구로 경영 의사 결정을 지원합니다.</p>
+            </div>
+        </section>
+
+        <section class="cta">
+            <h2>지금 바로 POS 시스템을 사용해보세요!</h2>
+            <a href="/pos" class="btn">POS 시작하기</a>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 POS 시스템. All rights reserved.</p>
+    </footer>
 </body>
 </html>

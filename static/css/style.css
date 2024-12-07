@@ -147,7 +147,7 @@ nav ul li a:hover {
 .pos-container {
     display: grid;
     gap: 1.5rem;
-    height: calc(100vh - 60px);
+    height: calc(100vh - 80px);
     padding: 1.5rem;
     overflow: hidden;
     background-color: var(--bg-color);
@@ -159,12 +159,21 @@ nav ul li a:hover {
     border-radius: 12px;
     padding: 1.5rem;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+}
+
+.tables-container h2 {
+    margin: 0 0 1rem 0;
+    font-size: 1.2rem;
 }
 
 #tables {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     gap: 1rem;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .table {
@@ -207,6 +216,11 @@ nav ul li a:hover {
     display: flex;
     flex-direction: column;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.menu-container h2 {
+    margin: 0 0 1rem 0;
+    font-size: 1.2rem;
 }
 
 #menu-categories {
@@ -298,7 +312,15 @@ nav ul li a:hover {
 
 .order-container h2 {
     margin: 0 0 1rem 0;
-    font-size: 1.3rem;
+    font-size: 1.2rem;
+    white-space: nowrap;
+}
+
+.order-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    gap: 0.5rem;
 }
 
 #selected-table {
@@ -308,29 +330,39 @@ nav ul li a:hover {
     padding: 0.3rem 0.8rem;
     border-radius: 15px;
     font-weight: 600;
-    margin-left: 0.5rem;
 }
 
 #order-items {
     flex: 1;
     overflow-y: auto;
-    margin: 1rem 0;
+    margin: 0.5rem 0;
     border-radius: 8px;
     border: 2px solid var(--border-color);
+    min-height: 0;
+}
+
+#order-items table {
+    width: 100%;
+    border-collapse: collapse;
 }
 
 #order-items th {
     background-color: var(--bg-color);
-    padding: 1rem;
+    padding: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     font-size: 0.9rem;
     letter-spacing: 0.5px;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 #order-items td {
-    padding: 0.75rem 1rem;
+    padding: 0.75rem;
     vertical-align: middle;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .remove-item-btn {
@@ -354,11 +386,11 @@ nav ul li a:hover {
 }
 
 .order-total {
-    font-size: 1.3rem;
+    font-size: 1.2rem;
     font-weight: 700;
     padding: 1rem 0;
     border-top: 2px solid var(--border-color);
-    margin-top: auto;
+    margin-top: 0.5rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -367,12 +399,12 @@ nav ul li a:hover {
 #submit-order-btn {
     width: 100%;
     margin-top: 1rem;
-    padding: 1.2rem;
+    padding: 1rem;
     background-color: var(--accent-color);
     color: white;
     border: none;
     border-radius: 8px;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1px;
@@ -388,7 +420,7 @@ nav ul li a:hover {
 /* Mobile Layout */
 @media screen and (max-width: 767px) {
     .pos-container {
-        grid-template-rows: auto minmax(300px, 45vh) minmax(300px, 45vh);
+        grid-template-rows: auto minmax(200px, 35vh) minmax(250px, 45vh);
         grid-template-columns: 1fr;
         padding: 1rem;
         gap: 1rem;
@@ -396,6 +428,7 @@ nav ul li a:hover {
 
     .tables-container {
         padding: 1rem;
+        max-height: 35vh;
     }
 
     #tables {
@@ -406,6 +439,14 @@ nav ul li a:hover {
     .menu-container,
     .order-container {
         padding: 1rem;
+    }
+
+    .menu-container {
+        height: 45vh;
+    }
+
+    .order-container {
+        height: 45vh;
     }
 }
 

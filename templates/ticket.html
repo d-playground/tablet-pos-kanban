@@ -66,6 +66,7 @@
             ticket.classList.add('ticket');
             ticket.dataset.orderId = order.id;
             ticket.dataset.status = order.status;
+            ticket.draggable = true; // Make ticket draggable
             
             // Add ticket content
             const table = document.createElement('h3');
@@ -89,6 +90,10 @@
             status.classList.add('status-indicator');
             status.textContent = order.status;
             ticket.appendChild(status);
+
+            // Add drag and drop handlers
+            ticket.addEventListener('dragstart', handleDragStart);
+            ticket.addEventListener('dragend', handleDragEnd);
 
             // Add touch event handlers
             let touchStartX = 0;
@@ -129,14 +134,6 @@
                     handleSwipe(ticket, direction);
                 } else {
                     ticket.style.transform = '';
-                }
-            });
-
-            // Add click handler for desktop
-            ticket.addEventListener('click', () => {
-                const nextStatus = statusProgression[order.status];
-                if (nextStatus && nextStatus !== order.status) {
-                    updateOrderStatus(order.id, nextStatus);
                 }
             });
 
@@ -220,6 +217,55 @@
 
         // Initial load
         fetchOrders();
+
+        // Drag and Drop functionality
+        function handleDragStart(e) {
+            e.target.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', e.target.dataset.orderId);
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            
+            const orderId = e.dataTransfer.getData('text/plain');
+            const ticket = document.querySelector(`[data-order-id="${orderId}"]`);
+            
+            if (!ticket || ticket.dataset.status === '취��') return;
+            
+            let newStatus;
+            const dropZone = e.currentTarget.closest('.column');
+            
+            if (dropZone.id === 'pending-orders') newStatus = '대기중';
+            else if (dropZone.id === 'in-progress-orders') newStatus = '진행중';
+            else if (dropZone.id === 'completed-orders') newStatus = '완료';
+            
+            if (newStatus && newStatus !== ticket.dataset.status) {
+                updateOrderStatus(orderId, newStatus);
+            }
+        }
+
+        // Add drag and drop event listeners to columns
+        document.querySelectorAll('.column').forEach(column => {
+            column.addEventListener('dragover', handleDragOver);
+            column.addEventListener('dragleave', handleDragLeave);
+            column.addEventListener('drop', handleDrop);
+        });
     </script>
 </body>
 </html>

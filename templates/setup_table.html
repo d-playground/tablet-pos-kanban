@@ -1,120 +1,314 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <title>Table Setup</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>테이블 관리</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
     <header>
         <nav>
             <ul>
-                <li><a href="/">홈</a></li>
-                <li><a href="/pos">POS</a></li>
-                <li><a href="/tickets">주문 현황판</a></li>
-                <li><a href="/setup/menus">메뉴 관리</a></li>
-                <li><a href="/setup/tables">테이블 관리</a></li>
+                <li><a href="/" class="nav-btn">홈</a></li>
+                <li><a href="/pos" class="nav-btn">POS</a></li>
+                <li><a href="/tickets" class="nav-btn">주문 현황판</a></li>
+                <li><a href="/setup/menus" class="nav-btn">메뉴 관리</a></li>
+                <li><a href="/setup/tables" class="nav-btn active">테이블 관리</a></li>
             </ul>
         </nav>
     </header>
 
-    <main class="container">
-        <h1>Table Setup</h1>
-
-        <div id="table-grid">
-            {% for table in tables %}
-                <div class="table" data-table-id="{{ table.id }}">
-                    {{ table.name }}
-                    <button class="edit-table-btn">Edit</button>
-                    <button class="delete-table-btn">X</button>
-                </div>
-            {% endfor %}
+    <main class="setup-container">
+        <div class="setup-header">
+            <h1>테이블 관리</h1>
+            <div class="header-actions">
+                <button id="add-table-btn" class="btn btn-primary">
+                    <span class="icon">➕</span>
+                    새 테이블 추가
+                </button>
+                <button id="save-all-btn" class="btn btn-success">
+                    <span class="icon">💾</span>
+                    전체 저장
+                </button>
+            </div>
         </div>
 
-        <form id="table-form">
-            <input type="hidden" id="table-id" value="">
-            <label for="table-name">Table Name:</label>
-            <input type="text" id="table-name" required>
-            <button type="submit" id="save-table-btn">Add Table</button>
-        </form>
+        <div class="table-grid" id="table-grid">
+            <!-- Tables will be dynamically added here -->
+        </div>
     </main>
 
+    <div id="notification" class="notification"></div>
+
     <script>
-        const tableGrid = document.getElementById('table-grid');
-        const tableForm = document.getElementById('table-form');
-        const tableIdInput = document.getElementById('table-id');
-        const tableNameInput = document.getElementById('table-name');
-        const saveTableButton = document.getElementById('save-table-btn');
+        // Socket.io setup
+        const socket = io();
+        let isConnected = false;
 
-        // Edit table
-        tableGrid.addEventListener('click', (event) => {
-            if (event.target.classList.contains('edit-table-btn')) {
-                const tableElement = event.target.closest('.table');
-                const tableId = tableElement.dataset.tableId;
-                const tableName = tableElement.textContent.trim();
-
-                tableIdInput.value = tableId;
-                tableNameInput.value = tableName;
-                saveTableButton.textContent = 'Save Table';
-            }
+        socket.on('connect', () => {
+            console.log('Socket connected');
+            isConnected = true;
+            showNotification('실시간 업데이트가 연결되었습니다', 'success');
         });
+
+        socket.on('connect_error', (error) => {
+            console.error('Socket connection error:', error);
+            isConnected = false;
+            showNotification('실시간 업데이트 연결에 실패했습니다', 'error');
+        });
+
+        socket.on('table_updated', () => {
+            fetchTables();
+        });
+
+        socket.on('order_status_updated', () => {
+            fetchTables();
+        });
+
+        // State management
+        let tables = [];
+        let isLoading = false;
+
+        // Initialize
+        async function initialize() {
+            await fetchTables();
+            setupEventListeners();
+        }
+
+        // Fetch tables
+        async function fetchTables() {
+            try {
+                const response = await fetch('/api/tables');
+                if (!response.ok) throw new Error('Failed to fetch tables');
+                
+                tables = await response.json();
+                renderTables();
+                
+            } catch (error) {
+                console.error('Error fetching tables:', error);
+                showNotification('테이블 목록을 불러오는데 실패했습니다', 'error');
+            }
+        }
+
+        // Render tables
+        function renderTables() {
+            const grid = document.getElementById('table-grid');
+            grid.innerHTML = '';
+            
+            tables.forEach((table, index) => {
+                const tableDiv = document.createElement('div');
+                tableDiv.className = 'table-item';
+                if (table.active_items > 0) {
+                    tableDiv.classList.add('occupied');
+                }
+                
+                tableDiv.innerHTML = `
+                    <input type="hidden" name="id" value="${table.id || ''}">
+                    <div class="table-header">
+                        <input type="text" name="name" value="${table.name}" 
+                               class="table-name-input"
+                               placeholder="테이블 이름" required
+                               ${table.active_items > 0 ? 'disabled' : ''}>
+                        ${table.active_items > 0 ? 
+                            `<span class="active-orders">
+                                <span class="icon">🔥</span>
+                                ${table.active_items}개 주문
+                            </span>` : 
+                            `<button class="delete-btn" onclick="deleteTable(${index})">
+                                <span class="icon">🗑️</span>
+                                삭제
+                            </button>`
+                        }
+                    </div>
+                    <div class="table-status">
+                        ${table.active_items > 0 ? 
+                            `<div class="status-badge occupied">
+                                <span class="icon">⏳</span>
+                                사용중
+                            </div>` : 
+                            `<div class="status-badge available">
+                                <span class="icon">✓</span>
+                                사용가능
+                            </div>`
+                        }
+                    </div>
+                `;
+                
+                grid.appendChild(tableDiv);
+            });
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Add new table
+            document.getElementById('add-table-btn').addEventListener('click', () => {
+                const newTableNumber = tables.length + 1;
+                let newTableName = `Table ${newTableNumber}`;
+                
+                // Find a unique name if Table N already exists
+                while (tables.some(t => t.name === newTableName)) {
+                    newTableName = `Table ${++newTableNumber}`;
+                }
+                
+                tables.unshift({
+                    name: newTableName,
+                    active_items: 0
+                });
+                
+                renderTables();
+                
+                // Focus on the first input of the new table
+                const firstInput = document.querySelector('.table-item:first-child input[name="name"]');
+                if (firstInput) {
+                    firstInput.focus();
+                    firstInput.select();
+                }
+            });
+            
+            // Save all changes
+            document.getElementById('save-all-btn').addEventListener('click', saveAllChanges);
+            
+            // Auto-save on input change
+            document.getElementById('table-grid').addEventListener('input', (e) => {
+                if (e.target.matches('input[name="name"]')) {
+                    const tableDiv = e.target.closest('.table-item');
+                    if (!tableDiv) return;
+                    
+                    clearTimeout(tableDiv.saveTimeout);
+                    tableDiv.saveTimeout = setTimeout(() => {
+                        if (e.target.value.trim()) {
+                            saveAllChanges();
+                        }
+                    }, 1000);
+                }
+            });
+        }
 
         // Delete table
-        tableGrid.addEventListener('click', (event) => {
-            if (event.target.classList.contains('delete-table-btn')) {
-                const tableElement = event.target.closest('.table');
-                const tableId = tableElement.dataset.tableId;
-
-                fetch(`/api/tables/${tableId}`, {
-                    method: 'DELETE'
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        tableElement.remove();
-                    })
-                    .catch(error => {
-                        console.error('Error deleting table:', error);
-                    });
+        async function deleteTable(index) {
+            const table = tables[index];
+            if (!table) return;
+            
+            if (table.active_items > 0) {
+                showNotification('진행 중인 주문이 있는 테이블은 삭제할 수 없습니다', 'error');
+                return;
             }
+            
+            if (!confirm('이 테이블을 삭제하시겠습니까?')) return;
+            
+            try {
+                if (table.id) {
+                    const response = await fetch(`/api/tables/${table.id}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to delete table');
+                    
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.message || '테이블 삭제에 실패했습니다');
+                }
+                
+                tables.splice(index, 1);
+                renderTables();
+                showNotification('테이블이 삭제되었습니다', 'success');
+                
+            } catch (error) {
+                console.error('Error deleting table:', error);
+                showNotification(error.message, 'error');
+            }
+        }
+
+        // Save all changes
+        async function saveAllChanges() {
+            if (isLoading) return;
+            setLoading(true);
+            
+            try {
+                const updatedTables = [];
+                const tableDivs = document.querySelectorAll('.table-item');
+                
+                // Validate and collect data
+                tableDivs.forEach(div => {
+                    const table = {
+                        id: div.querySelector('input[name="id"]').value || null,
+                        name: div.querySelector('input[name="name"]').value.trim()
+                    };
+                    
+                    if (!table.name) throw new Error('테이블 이름은 필수입니다');
+                    
+                    const duplicates = Array.from(tableDivs).filter(otherDiv => {
+                        if (div === otherDiv) return false;
+                        const otherName = otherDiv.querySelector('input[name="name"]').value.trim();
+                        return table.name === otherName;
+                    });
+                    
+                    if (duplicates.length > 0) {
+                        throw new Error(`중복된 테이블 이름이 있습니다: ${table.name}`);
+                    }
+                    
+                    updatedTables.push(table);
+                });
+                
+                const response = await fetch('/api/tables', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updatedTables)
+                });
+                
+                if (!response.ok) throw new Error('Failed to update tables');
+                
+                const data = await response.json();
+                if (!data.success) throw new Error(data.message || '테이블 업데이트에 실패했습니다');
+                
+                await fetchTables();
+                showNotification('모든 변경사항이 저장되었습니다', 'success');
+                
+            } catch (error) {
+                console.error('Error saving tables:', error);
+                showNotification(error.message, 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Notification system
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        // Initialize the page
+        initialize();
+
+        // Cleanup
+        window.addEventListener('beforeunload', () => {
+            socket.disconnect();
         });
 
-        // Add/Update table
-        tableForm.addEventListener('submit', saveTable);
-
-        function saveTable(event) {
-            event.preventDefault();
-
-            const tableId = tableIdInput.value;
-            const tableName = tableNameInput.value;
-
-            const tableData = {
-                id: tableId || null,  // Include ID if it exists
-                name: tableName,
-                status: 'available'  // Default status for new tables
-            };
-
-            fetch('/api/tables', {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify([tableData])  // Send as array since API expects array
-            })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(err => Promise.reject(err));
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.success) {
-                        alert('테이블이 성공적으로 저장되었습니다.');
-                        location.reload();  // Refresh the page to show updates
-                    }
-                })
-                .catch(error => {
-                    console.error('Error saving table:', error);
-                    alert('테이블 저장에 실패했습니다: ' + (error.message || '알 수 없는 오류'));
-                });
+        // Update loading state visuals
+        function setLoading(isLoading) {
+            const saveBtn = document.getElementById('save-all-btn');
+            const addBtn = document.getElementById('add-table-btn');
+            
+            [saveBtn, addBtn].forEach(btn => {
+                if (isLoading) {
+                    btn.classList.add('loading');
+                    btn.disabled = true;
+                } else {
+                    btn.classList.remove('loading');
+                    btn.disabled = false;
+                }
+            });
         }
     </script>
 </body>

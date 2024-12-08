@@ -2,270 +2,360 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="mobile-web-app-capable" content="yes">
-    <title>Order Tickets Board</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>주문 현황판</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
 <body>
     <header>
         <nav>
             <ul>
-                <li><a href="/">홈</a></li>
-                <li><a href="/pos">POS</a></li>
-                <li><a href="/tickets">주문 현황판</a></li>
-                <li><a href="/setup/menus">메뉴 관리</a></li>
-                <li><a href="/setup/tables">테이블 관리</a></li>
+                <li><a href="/" class="nav-btn">홈</a></li>
+                <li><a href="/pos" class="nav-btn">POS</a></li>
+                <li><a href="/tickets" class="nav-btn active">주문 현황판</a></li>
+                <li><a href="/setup/menus" class="nav-btn">메뉴 관리</a></li>
+                <li><a href="/setup/tables" class="nav-btn">테이블 관리</a></li>
             </ul>
         </nav>
     </header>
 
-    <main>
-        <h1>Order Tickets Board</h1>
+    <main class="kanban-container">
         <div class="kanban-board">
             <div class="column" id="pending-orders">
                 <h2>대기 중</h2>
-                <div class="ticket-container"></div>
+                <div class="ticket-container" data-status="대기중"></div>
             </div>
             <div class="column" id="in-progress-orders">
                 <h2>진행 중</h2>
-                <div class="ticket-container"></div>
+                <div class="ticket-container" data-status="진행중"></div>
             </div>
             <div class="column" id="completed-orders">
                 <h2>완료됨</h2>
-                <div class="ticket-container"></div>
+                <div class="ticket-container" data-status="완료"></div>
+                <button id="load-more" class="load-more-btn">
+                    <span class="btn-text">더 보기</span>
+                    <span class="btn-icon">↓</span>
+                </button>
+                <div class="completed-count">최근 10건 표시 중</div>
             </div>
         </div>
     </main>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.min.js"></script>
+    <div id="notification" class="notification"></div>
+    <div id="context-menu" class="context-menu">
+        <ul>
+            <li data-action="cancel" class="context-menu-item">
+                <span class="icon">❌</span>
+                주문 취소
+            </li>
+            <li data-action="edit" class="context-menu-item">
+                <span class="icon">✏️</span>
+                메모 수정
+            </li>
+        </ul>
+    </div>
+
     <script>
+        // Socket.io setup
         const socket = io();
-        
-        const pendingOrders = document.querySelector('#pending-orders .ticket-container');
-        const inProgressOrders = document.querySelector('#in-progress-orders .ticket-container');
-        const completedOrders = document.querySelector('#completed-orders .ticket-container');
-        
-        // Define status progression
-        const statusProgression = {
-            '대기중': '진행중',
-            '진행중': '완료',
-            '완료': '완료'  // No further progression
-        };
-        
-        function fetchOrders() {
-            fetch('/api/orders')
-                .then(response => response.json())
-                .then(renderOrders)
-                .catch(error => console.error('Error fetching orders:', error));
+        let isConnected = false;
+        let completedPage = 1;
+        const ITEMS_PER_PAGE = 10;
+
+        // Initialize Sortable instances
+        const containers = document.querySelectorAll('.ticket-container');
+        const sortables = [];
+
+        containers.forEach(container => {
+            const sortable = new Sortable(container, {
+                group: 'tickets',
+                animation: 150,
+                ghostClass: 'ticket-ghost',
+                chosenClass: 'ticket-chosen',
+                dragClass: 'ticket-drag',
+                onEnd: handleDragEnd,
+                delay: 150,
+                delayOnTouchOnly: true,
+                touchStartThreshold: 5
+            });
+            sortables.push(sortable);
+        });
+
+        // Socket event handlers
+        socket.on('connect', () => {
+            console.log('Socket connected');
+            isConnected = true;
+            showNotification('실시간 업데이트가 연결되었습니다', 'success');
+            fetchOrders();
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Socket connection error:', error);
+            isConnected = false;
+            showNotification('실시간 업데이트 연결에 실패했습니다', 'error');
+        });
+
+        ['order_status_updated', 'new_orders', 'order_item_deleted'].forEach(event => {
+            socket.on(event, fetchOrders);
+        });
+
+        // Load more button handler
+        document.getElementById('load-more').addEventListener('click', async () => {
+            completedPage++;
+            await fetchCompletedOrders();
+        });
+
+        // Fetch and render orders
+        async function fetchOrders() {
+            try {
+                const [activeOrders, completedOrders] = await Promise.all([
+                    fetch('/api/orders').then(res => res.json()),
+                    fetchCompletedOrders()
+                ]);
+
+                renderActiveOrders(activeOrders);
+            } catch (error) {
+                console.error('Error fetching orders:', error);
+                showNotification('주문 목록을 불러오는데 실패했습니다', 'error');
+            }
         }
 
-        function createTicket(order) {
-            const ticket = document.createElement('div');
-            ticket.classList.add('ticket');
-            ticket.dataset.orderId = order.id;
-            ticket.dataset.status = order.status;
-            ticket.draggable = true; // Make ticket draggable
+        async function fetchCompletedOrders() {
+            try {
+                const response = await fetch(`/api/orders/completed?page=${completedPage}&per_page=${ITEMS_PER_PAGE}`);
+                if (!response.ok) throw new Error('Failed to fetch completed orders');
+                
+                const data = await response.json();
+                renderCompletedOrders(data.orders, data.total);
+                
+                // Update load more button visibility
+                const loadMoreBtn = document.getElementById('load-more');
+                const completedCount = document.querySelector('.completed-count');
+                
+                if (data.total > completedPage * ITEMS_PER_PAGE) {
+                    loadMoreBtn.style.display = 'block';
+                    completedCount.textContent = `${completedPage * ITEMS_PER_PAGE}/${data.total}건 표시 중`;
+                } else {
+                    loadMoreBtn.style.display = 'none';
+                    completedCount.textContent = `전체 ${data.total}건 표시 중`;
+                }
+                
+                return data;
+            } catch (error) {
+                console.error('Error fetching completed orders:', error);
+                showNotification('완료된 주문을 불러오는데 실패했습니다', 'error');
+                throw error;
+            }
+        }
+
+        function renderActiveOrders(orders) {
+            const pendingContainer = document.querySelector('[data-status="대기중"]');
+            const progressContainer = document.querySelector('[data-status="진행중"]');
             
-            // Add ticket content
-            const table = document.createElement('h3');
-            table.textContent = `Table ${order.table_id}`;
-            ticket.appendChild(table);
+            pendingContainer.innerHTML = '';
+            progressContainer.innerHTML = '';
             
-            const items = document.createElement('ul');
-            order.items.forEach(item => {
-                const li = document.createElement('li');
-                li.textContent = `${item.name} × ${item.quantity}`;
-                items.appendChild(li);
+            orders.forEach(order => {
+                order.items.forEach(item => {
+                    const container = item.status === '대기중' ? pendingContainer : progressContainer;
+                    if (container) {
+                        container.appendChild(createTicket(item, order));
+                    }
+                });
             });
-            ticket.appendChild(items);
+        }
+
+        function renderCompletedOrders(orders, total) {
+            const container = document.querySelector('[data-status="완료"]');
             
-            const total = document.createElement('p');
-            total.textContent = `Total: $${order.total_amount.toFixed(2)}`;
-            ticket.appendChild(total);
+            if (completedPage === 1) {
+                container.innerHTML = '';
+            }
+            
+            orders.forEach(order => {
+                order.items.forEach(item => {
+                    container.appendChild(createTicket(item, order));
+                });
+            });
+        }
 
-            // Add status indicator
-            const status = document.createElement('div');
-            status.classList.add('status-indicator');
-            status.textContent = order.status;
-            ticket.appendChild(status);
+        function createTicket(item, order) {
+            const ticket = document.createElement('div');
+            ticket.className = 'ticket';
+            ticket.dataset.itemId = item.id;
+            ticket.dataset.status = item.status;
+            
+            ticket.innerHTML = `
+                <div class="ticket-header">
+                    <h3>${order.table_name || '테이블 없음'}</h3>
+                    <span class="timestamp">${formatTime(item.created_at)}</span>
+                </div>
+                <div class="ticket-content">
+                    <div class="menu-info">
+                        <span class="menu-name">${item.menu_name || '메뉴 없음'}</span>
+                        <span class="menu-category">${item.menu_category || ''}</span>
+                    </div>
+                    <div class="order-details">
+                        <p class="quantity">수량: ${item.quantity}</p>
+                        <p class="price">단가: ₩${formatPrice(item.unit_price)}</p>
+                        <p class="subtotal">합계: ₩${formatPrice(item.subtotal)}</p>
+                    </div>
+                    ${item.notes ? `<p class="notes">메모: ${item.notes}</p>` : ''}
+                    <div class="status-badge ${item.status}">${item.status}</div>
+                </div>
+            `;
 
-            // Add drag and drop handlers
-            ticket.addEventListener('dragstart', handleDragStart);
-            ticket.addEventListener('dragend', handleDragEnd);
-
-            // Add touch event handlers
-            let touchStartX = 0;
-            let touchEndX = 0;
-            let isLongPress = false;
-            let longPressTimer;
+            // Long press handler
+            let pressTimer;
+            let startX, startY;
+            const longPressThreshold = 800;
 
             ticket.addEventListener('touchstart', (e) => {
-                touchStartX = e.touches[0].clientX;
-                isLongPress = false;
-                longPressTimer = setTimeout(() => {
-                    isLongPress = true;
-                    if (confirm('주문을 취소하시겠습니까?')) {
-                        updateOrderStatus(order.id, '취소');
-                    }
-                }, 500);
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                
+                pressTimer = setTimeout(() => {
+                    showContextMenu(e, ticket);
+                }, longPressThreshold);
             });
 
             ticket.addEventListener('touchmove', (e) => {
-                clearTimeout(longPressTimer);
-                touchEndX = e.touches[0].clientX;
-                const diffX = touchEndX - touchStartX;
-                
-                if (Math.abs(diffX) > 20) {
-                    ticket.style.transform = `translateX(${diffX * 0.5}px)`;
+                if (Math.abs(e.touches[0].clientX - startX) > 10 || 
+                    Math.abs(e.touches[0].clientY - startY) > 10) {
+                    clearTimeout(pressTimer);
                 }
             });
 
-            ticket.addEventListener('touchend', (e) => {
-                clearTimeout(longPressTimer);
-                if (isLongPress) return;
-
-                const diffX = touchEndX - touchStartX;
-                const SWIPE_THRESHOLD = 100;
-                
-                if (Math.abs(diffX) >= SWIPE_THRESHOLD) {
-                    const direction = diffX > 0 ? 'right' : 'left';
-                    handleSwipe(ticket, direction);
-                } else {
-                    ticket.style.transform = '';
-                }
+            ticket.addEventListener('touchend', () => {
+                clearTimeout(pressTimer);
             });
 
             return ticket;
         }
 
-        function renderOrders(orders) {
-            // Clear existing tickets but keep headers
-            pendingOrders.innerHTML = '';
-            inProgressOrders.innerHTML = '';
-            completedOrders.innerHTML = '';
+        // Context menu handling
+        const contextMenu = document.getElementById('context-menu');
+
+        function showContextMenu(event, ticket) {
+            event.preventDefault();
             
-            orders.forEach(order => {
-                const ticket = createTicket(order);
-                
-                switch (order.status) {
-                    case '대기중':
-                        pendingOrders.appendChild(ticket);
-                        break;
-                    case '진행중':
-                        inProgressOrders.appendChild(ticket);
-                        break;
-                    case '완료':
-                        completedOrders.appendChild(ticket);
-                        break;
+            const rect = ticket.getBoundingClientRect();
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = `${rect.left}px`;
+            contextMenu.style.top = `${rect.bottom}px`;
+            
+            contextMenu.querySelectorAll('li').forEach(item => {
+                item.onclick = () => handleContextMenuAction(item.dataset.action, ticket);
+            });
+            
+            // Close menu when clicking outside
+            document.addEventListener('click', hideContextMenu);
+            document.addEventListener('touchstart', hideContextMenu);
+        }
+
+        function hideContextMenu() {
+            contextMenu.style.display = 'none';
+            document.removeEventListener('click', hideContextMenu);
+            document.removeEventListener('touchstart', hideContextMenu);
+        }
+
+        async function handleContextMenuAction(action, ticket) {
+            hideContextMenu();
+            
+            if (action === 'cancel') {
+                if (confirm('주문을 취소하시겠습니까?')) {
+                    await updateOrderStatus(ticket.dataset.itemId, '취소');
                 }
+            } else if (action === 'edit') {
+                const notes = prompt('메모를 입력하세요:', ticket.querySelector('.notes')?.textContent || '');
+                if (notes !== null) {
+                    await updateOrderNotes(ticket.dataset.itemId, notes);
+                }
+            }
+        }
+
+        // Drag and drop handling
+        async function handleDragEnd(event) {
+            if (!event.to || !event.item) return;
+            
+            const newStatus = event.to.dataset.status;
+            const itemId = event.item.dataset.itemId;
+            const oldStatus = event.item.dataset.status;
+            
+            if (newStatus && newStatus !== oldStatus) {
+                try {
+                    await updateOrderStatus(itemId, newStatus);
+                } catch (error) {
+                    console.error('Failed to update order status:', error);
+                    event.to.removeChild(event.item);
+                    event.from.appendChild(event.item);
+                    showNotification('상태 변경에 실패했습니다', 'error');
+                }
+            }
+        }
+
+        // API calls
+        async function updateOrderStatus(itemId, status) {
+            try {
+                const response = await fetch(`/api/orders/${itemId}/status`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status })
+                });
+
+                if (!response.ok) throw new Error('Failed to update status');
+                
+                showNotification('주문 상태가 변경되었습니다', 'success');
+            } catch (error) {
+                console.error('Error updating order status:', error);
+                throw error;
+            }
+        }
+
+        async function updateOrderNotes(itemId, notes) {
+            try {
+                const response = await fetch(`/api/orders/${itemId}/notes`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes })
+                });
+
+                if (!response.ok) throw new Error('Failed to update notes');
+                
+                showNotification('메모가 업데이트되었습니다', 'success');
+            } catch (error) {
+                console.error('Error updating order notes:', error);
+                showNotification('메모 업데이트에 실패했습니다', 'error');
+            }
+        }
+
+        // Utility functions
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString('ko-KR', {
+                hour: '2-digit',
+                minute: '2-digit'
             });
         }
 
-        function handleSwipe(ticket, direction) {
-            const currentStatus = ticket.dataset.status;
-            let newStatus;
-
-            if (direction === 'left') {
-                newStatus = statusProgression[currentStatus];
-            } else if (direction === 'right' && currentStatus !== '대기중') {
-                newStatus = Object.entries(statusProgression).find(([key, value]) => value === currentStatus)?.[0];
-            }
-
-            if (newStatus && newStatus !== currentStatus) {
-                ticket.classList.add('swiping');
-                if (direction === 'left') {
-                    ticket.classList.add('swipe-next');
-                } else {
-                    ticket.style.transform = 'translateX(100%)';
-                }
-
-                setTimeout(() => {
-                    updateOrderStatus(ticket.dataset.orderId, newStatus);
-                    ticket.classList.remove('swiping');
-                    ticket.classList.remove('swipe-next');
-                    ticket.style.transform = '';
-                }, 300);
-            }
+        function formatPrice(price) {
+            return new Intl.NumberFormat('ko-KR').format(price);
         }
-        
-        function updateOrderStatus(orderId, newStatus) {
-            fetch(`/api/orders/${orderId}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ status: newStatus })
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        socket.emit('update_order_status', { order_id: orderId, status: newStatus });
-                    }
-                })
-                .catch(error => console.error('Error updating order status:', error));
+
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
         }
-        
-        socket.on('order_status_updated', () => {
-            fetchOrders();
-        });
-        
-        socket.on('new_order', () => {
-            fetchOrders();
-        });
 
         // Initial load
         fetchOrders();
-
-        // Drag and Drop functionality
-        function handleDragStart(e) {
-            e.target.classList.add('dragging');
-            e.dataTransfer.setData('text/plain', e.target.dataset.orderId);
-            e.dataTransfer.effectAllowed = 'move';
-        }
-
-        function handleDragEnd(e) {
-            e.target.classList.remove('dragging');
-        }
-
-        function handleDragOver(e) {
-            e.preventDefault();
-            e.currentTarget.classList.add('drag-over');
-            e.dataTransfer.dropEffect = 'move';
-        }
-
-        function handleDragLeave(e) {
-            e.currentTarget.classList.remove('drag-over');
-        }
-
-        function handleDrop(e) {
-            e.preventDefault();
-            e.currentTarget.classList.remove('drag-over');
-            
-            const orderId = e.dataTransfer.getData('text/plain');
-            const ticket = document.querySelector(`[data-order-id="${orderId}"]`);
-            
-            if (!ticket || ticket.dataset.status === '취��') return;
-            
-            let newStatus;
-            const dropZone = e.currentTarget.closest('.column');
-            
-            if (dropZone.id === 'pending-orders') newStatus = '대기중';
-            else if (dropZone.id === 'in-progress-orders') newStatus = '진행중';
-            else if (dropZone.id === 'completed-orders') newStatus = '완료';
-            
-            if (newStatus && newStatus !== ticket.dataset.status) {
-                updateOrderStatus(orderId, newStatus);
-            }
-        }
-
-        // Add drag and drop event listeners to columns
-        document.querySelectorAll('.column').forEach(column => {
-            column.addEventListener('dragover', handleDragOver);
-            column.addEventListener('dragleave', handleDragLeave);
-            column.addEventListener('drop', handleDrop);
-        });
     </script>
 </body>
 </html>

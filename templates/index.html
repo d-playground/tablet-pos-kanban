@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS 시스템</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -19,35 +19,196 @@
         </nav>
     </header>
 
-    <main>
+    <main class="home-container">
         <section class="hero">
-            <h1>POS 시스템에 오신 것을 환영합니다!</h1>
-            <p>효율적인 주문 관리와 매출 증대를 위한 최고의 선택</p>
+            <h1>POS 시스템</h1>
+            <p class="subtitle">효율적인 주문 관리 시스템</p>
         </section>
 
-        <section class="features">
-            <div class="feature">
-                <h2>간편한 주문 관리</h2>
-                <p>직관적인 인터페이스로 주문을 빠르고 정확하게 처리할 수 있습니다.</p>
+        <section class="dashboard">
+            <div class="stats-container">
+                <h2>실시간 현황</h2>
+                <div class="stats-grid">
+                    <div class="stat-card" id="active-tables">
+                        <h3>사용중인 테이블</h3>
+                        <p class="stat-value">로딩중...</p>
+                    </div>
+                    <div class="stat-card" id="pending-orders">
+                        <h3>대기중인 주문</h3>
+                        <p class="stat-value">로딩중...</p>
+                    </div>
+                    <div class="stat-card" id="today-sales">
+                        <h3>오늘의 매출</h3>
+                        <p class="stat-value">로딩중...</p>
+                    </div>
+                </div>
             </div>
-            <div class="feature">
-                <h2>실시간 주문 현황</h2>
-                <p>주방과 연동된 실시간 주문 현황으로 업무 효율을 높일 수 있습니다.</p>
-            </div>
-            <div class="feature">
-                <h2>매출 분석 및 보고</h2>
-                <p>상세한 매출 데이터와 분석 도구로 경영 의사 결정을 지원합니다.</p>
-            </div>
-        </section>
 
-        <section class="cta">
-            <h2>지금 바로 POS 시스템을 사용해보세요!</h2>
-            <a href="/pos" class="btn">POS 시작하기</a>
+            <div class="quick-actions">
+                <h2>빠른 작업</h2>
+                <div class="action-buttons">
+                    <a href="/pos" class="action-btn">
+                        <span class="icon">💰</span>
+                        <span class="text">주문 입력</span>
+                    </a>
+                    <a href="/tickets" class="action-btn">
+                        <span class="icon">📋</span>
+                        <span class="text">주문 현황</span>
+                    </a>
+                    <a href="/setup/menus" class="action-btn">
+                        <span class="icon">🍽️</span>
+                        <span class="text">메뉴 관리</span>
+                    </a>
+                    <a href="/setup/tables" class="action-btn">
+                        <span class="icon">🪑</span>
+                        <span class="text">테이블 관리</span>
+                    </a>
+                </div>
+            </div>
         </section>
     </main>
 
-    <footer>
-        <p>&copy; 2023 POS 시스템. All rights reserved.</p>
-    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        let isConnected = false;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+
+        // Format currency
+        const formatCurrency = (amount) => {
+            return new Intl.NumberFormat('ko-KR', {
+                style: 'currency',
+                currency: 'KRW'
+            }).format(amount);
+        };
+
+        socket.on('connect', () => {
+            console.log('Socket connected');
+            isConnected = true;
+            retryCount = 0;
+            fetchStats();
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Socket connection error:', error);
+            isConnected = false;
+            handleConnectionError();
+        });
+
+        // Listen for updates
+        socket.on('stats_update', fetchStats);
+        socket.on('order_update', fetchStats);
+        socket.on('table_update', fetchStats);
+
+        async function fetchStats() {
+            try {
+                const [tablesData, ordersData, salesData] = await Promise.all([
+                    fetchWithRetry('/api/stats/tables'),
+                    fetchWithRetry('/api/stats/orders'),
+                    fetchWithRetry('/api/stats/sales/today')
+                ]);
+
+                updateTableStats(tablesData);
+                updateOrderStats(ordersData);
+                updateSalesStats(salesData);
+
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+                handleError('통계 데이터를 불러오는데 실패했습니다');
+            }
+        }
+
+        async function fetchWithRetry(url, retries = 0) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                if (retries < MAX_RETRIES) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)));
+                    return fetchWithRetry(url, retries + 1);
+                }
+                throw error;
+            }
+        }
+
+        function updateTableStats(data) {
+            const element = document.querySelector('#active-tables .stat-value');
+            if (data && typeof data.active === 'number' && typeof data.total === 'number') {
+                element.textContent = `${data.active} / ${data.total}`;
+                element.classList.remove('error');
+            } else {
+                handleError('테이블 데이터 형식이 잘못되었습니다', element);
+            }
+        }
+
+        function updateOrderStats(data) {
+            const element = document.querySelector('#pending-orders .stat-value');
+            if (data && typeof data.pending === 'number') {
+                element.textContent = `${data.pending}개`;
+                element.classList.remove('error');
+            } else {
+                handleError('주문 데이터 형식이 잘못되었습니다', element);
+            }
+        }
+
+        function updateSalesStats(data) {
+            const element = document.querySelector('#today-sales .stat-value');
+            if (data && typeof data.total === 'number') {
+                element.textContent = formatCurrency(data.total);
+                element.classList.remove('error');
+            } else {
+                handleError('매출 데이터 형식이 잘못되었습니다', element);
+            }
+        }
+
+        function handleError(message, element = null) {
+            console.error(message);
+            if (element) {
+                element.textContent = '오류';
+                element.classList.add('error');
+            }
+            
+            // Only show alert for critical errors
+            if (!element) {
+                const notification = document.createElement('div');
+                notification.className = 'error-notification';
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 5000);
+            }
+        }
+
+        function handleConnectionError() {
+            retryCount++;
+            if (retryCount <= MAX_RETRIES) {
+                setTimeout(() => {
+                    socket.connect();
+                }, 1000 * retryCount);
+            } else {
+                handleError('서버 연결에 실패했습니다. 페이지를 새로고침해주세요.');
+            }
+        }
+
+        // Initial load
+        fetchStats();
+
+        // Refresh stats periodically (every 30 seconds)
+        const refreshInterval = setInterval(() => {
+            if (isConnected) fetchStats();
+        }, 30000);
+
+        // Cleanup
+        window.addEventListener('beforeunload', () => {
+            clearInterval(refreshInterval);
+            socket.disconnect();
+        });
+    </script>
 </body>
 </html>

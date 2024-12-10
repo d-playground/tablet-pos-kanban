@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS order_items (
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (table_id) REFERENCES tables(id),
-    FOREIGN KEY (menu_id) REFERENCES menus(id)
+    FOREIGN KEY (table_id) REFERENCES tables(id) ON DELETE RESTRICT,
+    FOREIGN KEY (menu_id) REFERENCES menus(id) ON DELETE RESTRICT
 );
 
 -- Create indexes
@@ -103,12 +103,19 @@ WHERE oi.status = '완료'
 GROUP BY m.id
 ORDER BY total_quantity DESC;
 
--- Trigger to update table status
+-- Add trigger to update table status when order items change
 DELIMITER //
 
-DROP TRIGGER IF EXISTS update_table_status//
+CREATE OR REPLACE TRIGGER after_orderitem_insert
+AFTER INSERT ON order_items
+FOR EACH ROW
+BEGIN
+    UPDATE tables 
+    SET status = 'occupied'
+    WHERE id = NEW.table_id;
+END//
 
-CREATE TRIGGER update_table_status
+CREATE OR REPLACE TRIGGER after_orderitem_update
 AFTER UPDATE ON order_items
 FOR EACH ROW
 BEGIN

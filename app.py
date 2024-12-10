@@ -65,6 +65,13 @@ class OrderItemSchema(Schema):
 
 order_item_schema = OrderItemSchema()
 
+class OrderCompleteSchema(Schema):
+    table_id = fields.Int(required=True)
+    items = fields.List(fields.Dict(), required=True)
+    notes = fields.Str(allow_none=True)
+
+order_complete_schema = OrderCompleteSchema()
+
 # Utility functions
 def get_db_connection():
     """Get a database connection from the pool."""
@@ -672,6 +679,151 @@ def get_completed_orders():
     except Exception as e:
         app.logger.error(f"Error fetching completed orders: {str(e)}")
         raise InvalidUsage('Failed to fetch completed orders', status_code=500)
+
+@app.route('/api/orders/complete', methods=['POST'])
+def complete_order():
+    """Complete an order."""
+    try:
+        data = request.get_json()
+        validated_data = order_complete_schema.load(data)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Start transaction
+        conn.start_transaction()
+        
+        try:
+            # Update all active order items for the table to completed status
+            cursor.execute("""
+                UPDATE order_items 
+                SET status = '완료', 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE table_id = %s 
+                AND status NOT IN ('완료', '취소')
+            """, (validated_data['table_id'],))
+            
+            # Update table status to available
+            cursor.execute("""
+                UPDATE tables 
+                SET status = 'available' 
+                WHERE id = %s
+            """, (validated_data['table_id'],))
+            
+            conn.commit()
+            
+            # Emit socket event to update order status
+            socketio.emit('order_completed', {
+                'table_id': validated_data['table_id']
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': 'Order completed successfully'
+            })
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+            
+    except ValidationError as ve:
+        app.logger.error(f"Validation error: {str(ve)}")
+        raise InvalidUsage(ve.messages, status_code=400)
+    except Exception as e:
+        app.logger.error(f"Error completing order: {str(e)}")
+        raise InvalidUsage('Failed to complete order', status_code=500)
+    finally:
+        if 'conn' in locals():
+            close_db_connection(conn)
+
+@app.route('/api/tables/<int:table_id>/orders', methods=['GET'])
+def get_table_orders(table_id):
+    """Get all active orders for a specific table."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT 
+                oi.id,
+                oi.menu_id,
+                m.name as menu_name,
+                m.category as menu_category,
+                oi.quantity,
+                oi.unit_price,
+                oi.subtotal,
+                oi.status,
+                oi.notes,
+                oi.created_at
+            FROM order_items oi
+            JOIN menus m ON oi.menu_id = m.id
+            WHERE oi.table_id = %s
+            AND oi.status NOT IN ('완료', '취소')
+            ORDER BY oi.created_at DESC
+        """, (table_id,))
+        
+        items = cursor.fetchall()
+        
+        # Convert decimal values to float for JSON serialization
+        for item in items:
+            item['unit_price'] = float(item['unit_price'])
+            item['subtotal'] = float(item['subtotal'])
+            item['created_at'] = item['created_at'].isoformat()
+        
+        return jsonify(items)
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching table orders: {str(e)}")
+        raise InvalidUsage('Failed to fetch table orders', status_code=500)
+    finally:
+        if 'conn' in locals():
+            close_db_connection(conn)
+
+@app.route('/api/orders/<int:item_id>/cancel', methods=['PUT'])
+def cancel_order_item(item_id):
+    """Cancel a specific order item."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Start transaction
+        conn.start_transaction()
+        
+        try:
+            # Update the order item status to cancelled
+            cursor.execute("""
+                UPDATE order_items 
+                SET status = '취소',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s 
+                AND status NOT IN ('완료', '취소')
+            """, (item_id,))
+            
+            if cursor.rowcount == 0:
+                raise InvalidUsage('Order item not found or already completed/cancelled', status_code=404)
+            
+            conn.commit()
+            
+            # Emit socket event
+            socketio.emit('order_updated', {'item_id': item_id, 'status': '취소'})
+            
+            return jsonify({
+                'success': True,
+                'message': 'Order item cancelled successfully'
+            })
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+            
+    except InvalidUsage as iu:
+        raise iu
+    except Exception as e:
+        app.logger.error(f"Error cancelling order item: {str(e)}")
+        raise InvalidUsage('Failed to cancel order item', status_code=500)
+    finally:
+        if 'conn' in locals():
+            close_db_connection(conn)
 
 # Error handlers
 @app.errorhandler(InvalidUsage)

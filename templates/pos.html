@@ -95,14 +95,22 @@
             </div>
             
             <div class="order-footer">
+                <div class="order-actions">
+                    <button id="cancel-order-btn" class="danger-btn" disabled>주문 취소</button>
+                    <button id="checkout-btn" class="success-btn" disabled>결제 완료</button>
+                </div>
+
                 <div class="order-notes">
                     <label for="order-notes-input">주문 메모:</label>
                     <textarea id="order-notes-input" placeholder="주문 메모를 입력하세요..."></textarea>
                 </div>
                 
                 <div class="order-summary">
-                    <p class="order-total">합계: $<span id="order-total">0.00</span></p>
-                    <button id="submit-order-btn" disabled>주문 전송</button>
+                    <div class="summary-row total">
+                        <span>합계:</span>
+                        <span>$<span id="order-total">0.00</span></span>
+                    </div>
+                    <button id="submit-order-btn" class="primary-btn" disabled>주문 전송</button>
                 </div>
             </div>
         </section>
@@ -221,17 +229,137 @@
             });
         });
         
-        // Render order items
+        // Submit order
+        document.getElementById('submit-order-btn').addEventListener('click', async () => {
+            if (!selectedTable || orderItems.length === 0) return;
+            
+            try {
+                const response = await fetch('/api/orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        items: orderItems.map(item => ({
+                            table_id: selectedTable.id,
+                            menu_id: item.menu_id,
+                            quantity: item.quantity,
+                            notes: document.getElementById('order-notes-input').value
+                        }))
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '주문 전송에 실패했습니다');
+                }
+
+                showNotification('주문이 성공적으로 전송되었습니다', 'success');
+                
+                // Clear the order
+                orderItems.length = 0;
+                document.getElementById('order-notes-input').value = '';
+                renderOrder();
+                
+                // Refresh tables
+                await refreshTables();
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showNotification(error.message, 'error');
+            }
+        });
+
+        // Cancel order
+        document.getElementById('cancel-order-btn').addEventListener('click', () => {
+            if (orderItems.length === 0) return;
+            
+            if (confirm('현재 주문을 취소하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                orderItems.length = 0;
+                document.getElementById('order-notes-input').value = '';
+                renderOrder();
+                showNotification('주문이 취소되었습니다', 'info');
+            }
+        });
+
+        // Checkout functionality
+        document.getElementById('checkout-btn').addEventListener('click', async () => {
+            if (!selectedTable || orderItems.length === 0) return;
+            
+            if (!confirm('결제를 완료하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+            
+            try {
+                const response = await fetch('/api/orders/complete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        table_id: selectedTable.id,
+                        items: orderItems,
+                        notes: document.getElementById('order-notes-input').value
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '결제 처리 중 오류가 발생했습니다');
+                }
+                
+                showNotification('결제가 완료되었습니다', 'success');
+                
+                // Clear the order and table selection
+                orderItems.length = 0;
+                document.getElementById('order-notes-input').value = '';
+                document.querySelectorAll('.table').forEach(b => b.classList.remove('selected'));
+                selectedTable = null;
+                document.getElementById('selected-table').textContent = '테이블을 선택하세요';
+                renderOrder();
+                
+                // Refresh tables
+                await refreshTables();
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showNotification(error.message, 'error');
+            }
+        });
+
+        // Quantity controls
+        document.querySelector('#order-items').addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            if (isNaN(index)) return;
+            
+            if (e.target.classList.contains('minus')) {
+                if (orderItems[index].quantity > 1) {
+                    orderItems[index].quantity--;
+                    showNotification(`${orderItems[index].name} 수량이 감소되었습니다`, 'info');
+                }
+            } else if (e.target.classList.contains('plus')) {
+                orderItems[index].quantity++;
+                showNotification(`${orderItems[index].name} 수량이 증가되었습니다`, 'info');
+            } else if (e.target.classList.contains('remove-item-btn')) {
+                if (confirm(`${orderItems[index].name}을(를) 주문에서 제거하시겠습니까?`)) {
+                    const itemName = orderItems[index].name;
+                    orderItems.splice(index, 1);
+                    showNotification(`${itemName}이(가) 제거되었습니다`, 'info');
+                }
+            }
+            
+            renderOrder();
+        });
+
+        // Enhanced renderOrder function
         function renderOrder() {
             const tbody = document.querySelector('#order-items tbody');
             tbody.innerHTML = '';
             let total = 0;
             
             orderItems.forEach((item, index) => {
-                const tr = document.createElement('tr');
                 const subtotal = item.price * item.quantity;
                 total += subtotal;
                 
+                const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>
                         <div class="menu-info">
@@ -257,77 +385,12 @@
             });
             
             document.getElementById('order-total').textContent = total.toFixed(2);
-            document.getElementById('submit-order-btn').disabled = orderItems.length === 0;
+            
+            const hasItems = orderItems.length > 0;
+            document.getElementById('submit-order-btn').disabled = !hasItems || !selectedTable;
+            document.getElementById('cancel-order-btn').disabled = !hasItems;
+            document.getElementById('checkout-btn').disabled = !hasItems || !selectedTable;
         }
-        
-        // Quantity controls and remove item
-        document.querySelector('#order-items').addEventListener('click', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            if (isNaN(index)) return;
-            
-            if (e.target.classList.contains('minus')) {
-                if (orderItems[index].quantity > 1) {
-                    orderItems[index].quantity--;
-                    showNotification(`${orderItems[index].name} 수량이 감소되었습니다`, 'info');
-                }
-            } else if (e.target.classList.contains('plus')) {
-                orderItems[index].quantity++;
-                showNotification(`${orderItems[index].name} 수량이 증가되었습니다`, 'info');
-            } else if (e.target.classList.contains('remove-item-btn')) {
-                const itemName = orderItems[index].name;
-                orderItems.splice(index, 1);
-                showNotification(`${itemName}이(가) 제거되었습니다`, 'info');
-            }
-            
-            renderOrder();
-        });
-        
-        // Submit order
-        document.getElementById('submit-order-btn').addEventListener('click', async () => {
-            if (!selectedTable || orderItems.length === 0) return;
-            
-            const notes = document.getElementById('order-notes-input').value.trim();
-            
-            const orderData = {
-                items: orderItems.map(item => ({
-                    table_id: selectedTable.id,
-                    menu_id: item.menu_id,
-                    quantity: item.quantity,
-                    notes: notes || null
-                }))
-            };
-            
-            try {
-                const response = await fetch('/api/orders', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(orderData)
-                });
-
-                const data = await response.json();
-                
-                if (!response.ok) throw new Error(data.message || '주문 전송에 실패했습니다');
-                
-                // Clear order state
-                selectedTable = null;
-                orderItems.length = 0;
-                document.querySelectorAll('.table').forEach(b => b.classList.remove('selected'));
-                document.getElementById('selected-table').textContent = '테이블을 선택하세요';
-                document.getElementById('order-notes-input').value = '';
-                renderOrder();
-                
-                showNotification('주문이 성공적으로 전송되었습니다', 'success');
-                
-                // Refresh tables
-                await refreshTables();
-                
-            } catch (error) {
-                console.error('Error:', error);
-                showNotification(error.message, 'error');
-            }
-        });
 
         // Refresh tables
         async function refreshTables() {
@@ -363,13 +426,14 @@
             }
         }
 
-        // Notification system
+        // Enhanced notification system
         function showNotification(message, type = 'info') {
             const notification = document.getElementById('notification');
             notification.textContent = message;
             notification.className = `notification ${type}`;
             notification.style.display = 'block';
             
+            // Auto-hide after 3 seconds
             setTimeout(() => {
                 notification.style.display = 'none';
             }, 3000);
@@ -377,8 +441,13 @@
 
         // Cleanup
         window.addEventListener('beforeunload', () => {
-            socket.disconnect();
+            if (orderItems.length > 0) {
+                return '주문이 완료되지 않았습니다. 정말로 나가시겠습니까?';
+            }
         });
+
+        // Initialize
+        socket.connect();
     </script>
 </body>
 </html>

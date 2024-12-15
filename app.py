@@ -38,6 +38,7 @@ db_pool = mysql.connector.pooling.MySQLConnectionPool(
 )
 
 app = Flask(__name__)
+app.config['JSON_AS_ASCII'] = False
 socketio = SocketIO(app)
 
 # Custom exception class
@@ -72,6 +73,14 @@ class OrderCompleteSchema(Schema):
 
 order_complete_schema = OrderCompleteSchema()
 
+# Constants for order status
+ORDER_STATUS = {
+    'PENDING': 'pending',
+    'IN_PROGRESS': 'inprogress',
+    'COMPLETED': 'completed',
+    'CANCELLED': 'cancelled'
+}
+
 # Utility functions
 def get_db_connection():
     """Get a database connection from the pool."""
@@ -98,10 +107,9 @@ def pos():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # Get tables with their current status
         cursor.execute("""
             SELECT t.*, 
-                   COUNT(CASE WHEN oi.status NOT IN ('완료', '취소') THEN 1 END) as active_items
+                   COUNT(CASE WHEN oi.status NOT IN ('completed', 'cancelled') THEN 1 END) as active_items
             FROM tables t
             LEFT JOIN order_items oi ON t.id = oi.table_id
             GROUP BY t.id
@@ -153,7 +161,7 @@ def get_orders():
             FROM order_items oi
             JOIN menus m ON oi.menu_id = m.id
             JOIN tables t ON oi.table_id = t.id
-            WHERE oi.status NOT IN ('완료', '취소')
+            WHERE oi.status NOT IN ('completed', 'cancelled')
             ORDER BY oi.created_at DESC
         """)
         
@@ -244,23 +252,51 @@ def create_order():
             close_db_connection(conn)
         raise InvalidUsage('Failed to create order', status_code=500)
 
-@app.route('/api/orders/<int:item_id>', methods=['PUT'])
+@app.route('/api/orders/<int:item_id>/status', methods=['PUT'])
 def update_order_status(item_id):
     """Update the status of an order item."""
     try:
         data = request.get_json()
         new_status = data['status']
         
-        conn = get_db_connection()
+        # 이 부분이 데이터베이스의 ENUM 값과 정확히 일치해야 합니다
+        valid_statuses = ['pending', 'inprogress', 'completed', 'cancelled']
+        if new_status not in valid_statuses:
+            raise InvalidUsage(f'Invalid status. Must be one of: {", ".join(valid_statuses)}')
+        
+        app.logger.info(f"Updating order {item_id} status to {new_status}")  # 로깅 추가
+        
+        try:
+            conn = get_db_connection()
+        except Exception as e:
+            app.logger.error(f"Failed to get database connection: {str(e)}")
+            raise InvalidUsage('Database connection failed', status_code=500)
+            
         cursor = conn.cursor()
         
-        cursor.execute(
-            "UPDATE order_items SET status = %s WHERE id = %s",
-            (new_status, item_id)
-        )
-        
-        conn.commit()
-        close_db_connection(conn)
+        try:
+            cursor.execute(
+                "SELECT status FROM order_items WHERE id = %s",
+                (item_id,)
+            )
+            current = cursor.fetchone()
+            if not current:
+                raise InvalidUsage('Order item not found', status_code=404)
+                
+            app.logger.info(f"Current status: {current[0]}")  # 로깅 추가
+            
+            cursor.execute(
+                "UPDATE order_items SET status = %s WHERE id = %s",
+                (new_status, item_id)
+            )
+            
+            conn.commit()
+            
+        except mysql.connector.Error as e:
+            app.logger.error(f"MySQL Error: {e.errno} - {e.msg}")  # 상세 에러 로깅
+            raise
+        finally:
+            close_db_connection(conn)
         
         # Emit socket event
         socketio.emit('order_status_updated', {
@@ -270,11 +306,15 @@ def update_order_status(item_id):
         
         return jsonify({'success': True})
         
+    except InvalidUsage as e:
+        raise e
+    except KeyError:
+        raise InvalidUsage('Status field is required')
+    except mysql.connector.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        raise InvalidUsage(f'Database error: {str(e)}', status_code=500)
     except Exception as e:
         app.logger.error(f"Error updating order status: {str(e)}")
-        if 'conn' in locals():
-            conn.rollback()
-            close_db_connection(conn)
         raise InvalidUsage('Failed to update order status', status_code=500)
 
 @app.route('/api/orders/<int:item_id>', methods=['DELETE'])
@@ -284,7 +324,7 @@ def delete_order_item(item_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("UPDATE order_items SET status = '취소' WHERE id = %s", (item_id,))
+        cursor.execute("UPDATE order_items SET status = 'cancelled' WHERE id = %s", (item_id,))
         
         conn.commit()
         close_db_connection(conn)
@@ -499,12 +539,15 @@ def get_today_sales():
                 COUNT(*) as total_orders
             FROM order_items
             WHERE DATE(created_at) = CURDATE()
-            AND status = '완료'
-        """)
+            AND status = %s
+        """, (ORDER_STATUS['COMPLETED'],))
         
         stats = cursor.fetchone()
         if stats['total'] is None:
             stats['total'] = 0
+            
+        # Convert Decimal to float for JSON serialization
+        stats['total'] = float(stats['total'])
             
         close_db_connection(conn)
         
@@ -697,11 +740,16 @@ def complete_order():
             # Update all active order items for the table to completed status
             cursor.execute("""
                 UPDATE order_items 
-                SET status = '완료', 
+                SET status = %s, 
                     updated_at = CURRENT_TIMESTAMP
                 WHERE table_id = %s 
-                AND status NOT IN ('완료', '취소')
-            """, (validated_data['table_id'],))
+                AND status NOT IN (%s, %s)
+            """, (
+                ORDER_STATUS['COMPLETED'],
+                validated_data['table_id'],
+                ORDER_STATUS['COMPLETED'],
+                ORDER_STATUS['CANCELLED']
+            ))
             
             # Update table status to available
             cursor.execute("""
@@ -844,4 +892,10 @@ def handle_disconnect():
     app.logger.info('Client disconnected')
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000)
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    socketio.run(app, 
+        host='0.0.0.0', 
+        port=5000, 
+        debug=debug,
+        use_reloader=debug
+    )

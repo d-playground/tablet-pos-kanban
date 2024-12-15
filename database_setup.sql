@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     quantity INT NOT NULL DEFAULT 1,
     unit_price DECIMAL(10,2) NOT NULL,
     subtotal DECIMAL(10,2) GENERATED ALWAYS AS (quantity * unit_price) STORED,
-    status ENUM('대기중', '진행중', '완료', '취소') DEFAULT '대기중',
+    status ENUM('pending', 'inprogress', 'completed', 'cancelled') DEFAULT 'pending',
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -45,17 +45,34 @@ CREATE INDEX idx_orderitem_status ON order_items(status);
 CREATE INDEX idx_orderitem_table ON order_items(table_id);
 CREATE INDEX idx_orderitem_created ON order_items(created_at);
 
--- Create a dedicated user for the POS application
-CREATE USER IF NOT EXISTS 'pos_user'@'localhost' IDENTIFIED BY '1234';
-GRANT SELECT, INSERT, UPDATE, DELETE ON pos.* TO 'pos_user'@'localhost';
-FLUSH PRIVILEGES;
+-- Create views for analytics
+CREATE OR REPLACE VIEW daily_sales AS
+SELECT 
+    DATE(created_at) as sale_date,
+    COUNT(*) as total_orders,
+    SUM(subtotal) as total_sales,
+    AVG(subtotal) as average_order_value
+FROM order_items
+WHERE status = 'completed'
+GROUP BY DATE(created_at);
 
--- Insert sample tables
+CREATE OR REPLACE VIEW popular_items AS
+SELECT 
+    m.name,
+    m.category,
+    SUM(oi.quantity) as total_quantity,
+    SUM(oi.subtotal) as total_revenue
+FROM order_items oi
+JOIN menus m ON oi.menu_id = m.id
+WHERE oi.status = 'completed'
+GROUP BY m.id
+ORDER BY total_quantity DESC;
+
+-- Insert sample data
 INSERT INTO tables (name) VALUES 
 ('Table 1'), ('Table 2'), ('Table 3'), ('Table 4'),
 ('Table 5'), ('Table 6'), ('Bar 1'), ('Bar 2');
 
--- Insert sample menu categories
 INSERT INTO menus (name, price, category) VALUES 
 -- Classic Cocktails
 ('Old Fashioned', 12.99, 'Classic Cocktails'),
@@ -77,36 +94,10 @@ INSERT INTO menus (name, price, category) VALUES
 ('Olive Medley', 6.99, 'Bar Snacks'),
 ('Cheese Board', 15.99, 'Bar Snacks');
 
--- Create views for analytics
-DROP VIEW IF EXISTS daily_sales;
-DROP VIEW IF EXISTS popular_items;
-
-CREATE OR REPLACE VIEW daily_sales AS
-SELECT 
-    DATE(created_at) as sale_date,
-    COUNT(*) as total_orders,
-    SUM(subtotal) as total_sales,
-    AVG(subtotal) as average_order_value
-FROM order_items
-WHERE status = '완료'
-GROUP BY DATE(created_at);
-
-CREATE OR REPLACE VIEW popular_items AS
-SELECT 
-    m.name,
-    m.category,
-    SUM(oi.quantity) as total_quantity,
-    SUM(oi.subtotal) as total_revenue
-FROM order_items oi
-JOIN menus m ON oi.menu_id = m.id
-WHERE oi.status = '완료'
-GROUP BY m.id
-ORDER BY total_quantity DESC;
-
--- Add trigger to update table status when order items change
+-- Create triggers
 DELIMITER //
 
-CREATE OR REPLACE TRIGGER after_orderitem_insert
+CREATE TRIGGER after_orderitem_insert
 AFTER INSERT ON order_items
 FOR EACH ROW
 BEGIN
@@ -115,7 +106,7 @@ BEGIN
     WHERE id = NEW.table_id;
 END//
 
-CREATE OR REPLACE TRIGGER after_orderitem_update
+CREATE TRIGGER after_orderitem_update
 AFTER UPDATE ON order_items
 FOR EACH ROW
 BEGIN
@@ -124,7 +115,7 @@ BEGIN
     SELECT COUNT(*) INTO active_items
     FROM order_items
     WHERE table_id = NEW.table_id
-    AND status NOT IN ('완료', '취소');
+    AND status NOT IN ('completed', 'cancelled');
     
     IF active_items = 0 THEN
         UPDATE tables 
@@ -137,4 +128,10 @@ BEGIN
     END IF;
 END//
 
-DELIMITER ; 
+DELIMITER ;
+
+-- Create a dedicated user for the POS application
+CREATE USER IF NOT EXISTS 'pos_user'@'localhost' IDENTIFIED BY '1234';
+GRANT SELECT, INSERT, UPDATE, DELETE ON pos.* TO 'pos_user'@'localhost';
+FLUSH PRIVILEGES;
+  

@@ -24,16 +24,16 @@
     <main class="kanban-container">
         <div class="kanban-board">
             <div class="column" id="pending-orders">
-                <h2>대기 중</h2>
-                <div class="ticket-container" data-status="대기중"></div>
+                <h2>Pending</h2>
+                <div class="ticket-container" data-status="pending"></div>
             </div>
             <div class="column" id="in-progress-orders">
-                <h2>진행 중</h2>
-                <div class="ticket-container" data-status="진행중"></div>
+                <h2>In Progress</h2>
+                <div class="ticket-container" data-status="inprogress"></div>
             </div>
             <div class="column" id="completed-orders">
-                <h2>완료됨</h2>
-                <div class="ticket-container" data-status="완료"></div>
+                <h2>Completed</h2>
+                <div class="ticket-container" data-status="completed"></div>
                 <button id="load-more" class="load-more-btn">
                     <span class="btn-text">더 보기</span>
                     <span class="btn-icon">↓</span>
@@ -151,15 +151,20 @@
         }
 
         function renderActiveOrders(orders) {
-            const pendingContainer = document.querySelector('[data-status="대기중"]');
-            const progressContainer = document.querySelector('[data-status="진행중"]');
+            const pendingContainer = document.querySelector('[data-status="pending"]');
+            const progressContainer = document.querySelector('[data-status="inprogress"]');
             
             pendingContainer.innerHTML = '';
             progressContainer.innerHTML = '';
             
             orders.forEach(order => {
                 order.items.forEach(item => {
-                    const container = item.status === '대기중' ? pendingContainer : progressContainer;
+                    let container;
+                    if (item.status === 'pending') {
+                        container = pendingContainer;
+                    } else if (item.status === 'inprogress') {
+                        container = progressContainer;
+                    }
                     if (container) {
                         container.appendChild(createTicket(item, order));
                     }
@@ -168,7 +173,7 @@
         }
 
         function renderCompletedOrders(orders, total) {
-            const container = document.querySelector('[data-status="완료"]');
+            const container = document.querySelector('[data-status="completed"]');
             
             if (completedPage === 1) {
                 container.innerHTML = '';
@@ -187,112 +192,73 @@
             ticket.dataset.itemId = item.id;
             ticket.dataset.status = item.status;
             
+            const timeString = new Date(item.created_at).toLocaleTimeString('ko-KR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
             ticket.innerHTML = `
                 <div class="ticket-header">
-                    <h3>${order.table_name || '테이블 없음'}</h3>
-                    <span class="timestamp">${formatTime(item.created_at)}</span>
+                    <h3>${order.table_name}</h3>
+                    <span class="timestamp">${timeString}</span>
                 </div>
                 <div class="ticket-content">
                     <div class="menu-info">
-                        <span class="menu-name">${item.menu_name || '메뉴 없음'}</span>
-                        <span class="menu-category">${item.menu_category || ''}</span>
+                        <span class="menu-name">${item.menu_name}</span>
+                        <span class="menu-category">${item.menu_category}</span>
                     </div>
                     <div class="order-details">
-                        <p class="quantity">수량: ${item.quantity}</p>
-                        <p class="price">단가: ₩${formatPrice(item.unit_price)}</p>
-                        <p class="subtotal">합계: ₩${formatPrice(item.subtotal)}</p>
+                        <span>수량: ${item.quantity}</span>
+                        <span>단가: ₩${formatNumber(item.unit_price)}</span>
                     </div>
-                    ${item.notes ? `<p class="notes">메모: ${item.notes}</p>` : ''}
-                    <div class="status-badge ${item.status}">${item.status}</div>
+                    <div class="order-total">
+                        합계: ₩${formatNumber(item.subtotal)}
+                    </div>
+                    ${item.notes ? `<div class="notes">${item.notes}</div>` : ''}
                 </div>
             `;
-
-            // Long press handler
-            let pressTimer;
-            let startX, startY;
-            const longPressThreshold = 800;
-
-            ticket.addEventListener('touchstart', (e) => {
-                startX = e.touches[0].clientX;
-                startY = e.touches[0].clientY;
-                
-                pressTimer = setTimeout(() => {
-                    showContextMenu(e, ticket);
-                }, longPressThreshold);
-            });
-
-            ticket.addEventListener('touchmove', (e) => {
-                if (Math.abs(e.touches[0].clientX - startX) > 10 || 
-                    Math.abs(e.touches[0].clientY - startY) > 10) {
-                    clearTimeout(pressTimer);
-                }
-            });
-
-            ticket.addEventListener('touchend', () => {
-                clearTimeout(pressTimer);
-            });
-
             return ticket;
-        }
-
-        // Context menu handling
-        const contextMenu = document.getElementById('context-menu');
-
-        function showContextMenu(event, ticket) {
-            event.preventDefault();
-            
-            const rect = ticket.getBoundingClientRect();
-            contextMenu.style.display = 'block';
-            contextMenu.style.left = `${rect.left}px`;
-            contextMenu.style.top = `${rect.bottom}px`;
-            
-            contextMenu.querySelectorAll('li').forEach(item => {
-                item.onclick = () => handleContextMenuAction(item.dataset.action, ticket);
-            });
-            
-            // Close menu when clicking outside
-            document.addEventListener('click', hideContextMenu);
-            document.addEventListener('touchstart', hideContextMenu);
-        }
-
-        function hideContextMenu() {
-            contextMenu.style.display = 'none';
-            document.removeEventListener('click', hideContextMenu);
-            document.removeEventListener('touchstart', hideContextMenu);
-        }
-
-        async function handleContextMenuAction(action, ticket) {
-            hideContextMenu();
-            
-            if (action === 'cancel') {
-                if (confirm('주문을 취소하시겠습니까?')) {
-                    await updateOrderStatus(ticket.dataset.itemId, '취소');
-                }
-            } else if (action === 'edit') {
-                const notes = prompt('메모를 입력하세요:', ticket.querySelector('.notes')?.textContent || '');
-                if (notes !== null) {
-                    await updateOrderNotes(ticket.dataset.itemId, notes);
-                }
-            }
         }
 
         // Drag and drop handling
         async function handleDragEnd(event) {
-            if (!event.to || !event.item) return;
-            
-            const newStatus = event.to.dataset.status;
             const itemId = event.item.dataset.itemId;
-            const oldStatus = event.item.dataset.status;
+            const newStatus = event.to.dataset.status;
+            const oldStatus = event.from.dataset.status;
             
-            if (newStatus && newStatus !== oldStatus) {
-                try {
-                    await updateOrderStatus(itemId, newStatus);
-                } catch (error) {
-                    console.error('Failed to update order status:', error);
-                    event.to.removeChild(event.item);
-                    event.from.appendChild(event.item);
-                    showNotification('상태 변경에 실패했습니다', 'error');
+            if (newStatus === oldStatus) return;
+            
+            console.log('Drag end:', {
+                itemId,
+                newStatus,
+                oldStatus,
+                fromElement: event.from,
+                toElement: event.to,
+                fromDataset: event.from.dataset,
+                toDataset: event.to.dataset
+            });
+            
+            try {
+                const response = await fetch(`/api/orders/${itemId}/status`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ status: newStatus })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Server error:', errorData);
+                    throw new Error(errorData.message || '상태 변경 실패');
                 }
+
+                event.item.dataset.status = newStatus;
+                showNotification('주문 상태가 변경되었습니다', 'success');
+            } catch (error) {
+                console.error('Error details:', error);
+                event.from.appendChild(event.item);
+                showNotification('주문 상태 변경에 실패했습니다: ' + error.message, 'error');
             }
         }
 
@@ -311,23 +277,6 @@
             } catch (error) {
                 console.error('Error updating order status:', error);
                 throw error;
-            }
-        }
-
-        async function updateOrderNotes(itemId, notes) {
-            try {
-                const response = await fetch(`/api/orders/${itemId}/notes`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ notes })
-                });
-
-                if (!response.ok) throw new Error('Failed to update notes');
-                
-                showNotification('메모가 업데이트되었습니다', 'success');
-            } catch (error) {
-                console.error('Error updating order notes:', error);
-                showNotification('메모 업데이트에 실패했습니다', 'error');
             }
         }
 
@@ -356,6 +305,42 @@
 
         // Initial load
         fetchOrders();
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // 칸반 보드 높이 설정
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            main.style.height = `calc(100vh - ${header.offsetHeight}px)`;
+            
+            // Sortable 초기화 수정
+            const containers = document.querySelectorAll('.ticket-container');
+            containers.forEach(container => {
+                new Sortable(container, {
+                    group: {
+                        name: 'tickets',
+                        pull: function (to, from) {
+                            return from.el.dataset.status !== 'completed';
+                        },
+                        put: function (to) {
+                            return to.el.dataset.status !== 'completed';
+                        }
+                    },
+                    animation: 150,
+                    ghostClass: 'ticket-ghost',
+                    chosenClass: 'ticket-chosen',
+                    dragClass: 'ticket-drag',
+                    onEnd: handleDragEnd,
+                    delay: 150,
+                    delayOnTouchOnly: true,
+                    touchStartThreshold: 5
+                });
+            });
+        });
+
+        // 숫자 포맷 함수 추가
+        function formatNumber(num) {
+            return new Intl.NumberFormat('ko-KR').format(num);
+        }
     </script>
 </body>
 </html>

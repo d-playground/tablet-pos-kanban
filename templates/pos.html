@@ -38,11 +38,13 @@
         </section>
         
         <section class="menu-container">
-            <h2>메뉴</h2>
-            <div class="search-bar">
-                <input type="text" id="menu-search" placeholder="메뉴 검색...">
+            <div class="menu-header">
+                <h2>메뉴</h2>
+                <div class="search-bar">
+                    <input type="text" id="menu-search" placeholder="메뉴 검색..." class="search-input">
+                </div>
             </div>
-            <div id="menu-categories">
+            <div id="menu-categories" class="menu-categories">
                 <button class="menu-category-btn active" data-category="all">전체</button>
                 {% for category in categories %}
                     <button class="menu-category-btn" data-category="{{ category }}">{{ category }}</button>
@@ -52,19 +54,24 @@
                 {% for item in menus %}
                     <div class="menu-item" data-category="{{ item.category }}" data-search="{{ item.name.lower() }}">
                         <div class="menu-item-content">
-                            <span class="menu-item-name">{{ item.name }}</span>
-                            <span class="menu-item-price">${{ "%.2f"|format(item.price) }}</span>
-                            {% if item.description %}
-                                <span class="menu-item-description">{{ item.description }}</span>
-                            {% endif %}
+                            <div class="menu-item-header">
+                                <h3 class="menu-item-name">{{ item.name }}</h3>
+                                <span class="menu-item-category">{{ item.category }}</span>
+                            </div>
+                            <div class="menu-item-details">
+                                <span class="menu-item-price">₩{{ "{:,.0f}".format(item.price) }}</span>
+                                {% if item.description %}
+                                    <p class="menu-item-description">{{ item.description }}</p>
+                                {% endif %}
+                            </div>
                         </div>
-                        <button class="add-to-order-btn" 
+                        <button class="add-to-order-btn {% if not item.is_available %}disabled{% endif %}" 
                                 data-menu-id="{{ item.id }}"
                                 data-menu-name="{{ item.name }}"
                                 data-menu-price="{{ item.price }}"
-                                data-menu-category="{{ item.category }}"
-                                {% if not item.is_available %}disabled{% endif %}>
-                            {% if item.is_available %}추가{% else %}품절{% endif %}
+                                data-menu-category="{{ item.category }}">
+                            <span class="icon">{% if item.is_available %}+{% else %}✕{% endif %}</span>
+                            <span class="text">{% if item.is_available %}추가{% else %}품절{% endif %}</span>
                         </button>
                     </div>
                 {% endfor %}
@@ -74,7 +81,7 @@
         <section class="order-container">
             <div class="order-header">
                 <h2>현재 주문</h2>
-                <div id="selected-table">테이블을 선택하세요</div>
+                <div id="selected-table" class="selected-table">테이블을 선택하세요</div>
             </div>
             
             <div class="order-items-container">
@@ -83,34 +90,49 @@
                         <tr>
                             <th>메뉴</th>
                             <th>수량</th>
-                            <th>가격</th>
+                            <th>단가</th>
                             <th>소계</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Order items will be dynamically added here -->
+                        <!-- 동적으로 추가될 주문 아이템들 -->
                     </tbody>
                 </table>
             </div>
             
             <div class="order-footer">
-                <div class="order-actions">
-                    <button id="cancel-order-btn" class="danger-btn" disabled>주문 취소</button>
-                    <button id="checkout-btn" class="success-btn" disabled>결제 완료</button>
-                </div>
-
                 <div class="order-notes">
-                    <label for="order-notes-input">주문 메모:</label>
-                    <textarea id="order-notes-input" placeholder="주문 메모를 입력하세요..."></textarea>
+                    <textarea id="order-notes-input" 
+                              class="order-notes-input" 
+                              placeholder="주문 메모를 입력하세요..."
+                              rows="2"></textarea>
                 </div>
                 
                 <div class="order-summary">
-                    <div class="summary-row total">
-                        <span>합계:</span>
-                        <span>$<span id="order-total">0.00</span></span>
+                    <div class="summary-row subtotal">
+                        <span>주문 금액:</span>
+                        <span>₩<span id="order-subtotal">0</span></span>
                     </div>
-                    <button id="submit-order-btn" class="primary-btn" disabled>주문 전송</button>
+                    <div class="summary-row total">
+                        <span>최종 금액:</span>
+                        <span>₩<span id="order-total">0</span></span>
+                    </div>
+                </div>
+                
+                <div class="order-actions">
+                    <button id="cancel-order-btn" class="btn btn-danger" disabled>
+                        <span class="icon">✕</span>
+                        주문 취소
+                    </button>
+                    <button id="submit-order-btn" class="btn btn-primary" disabled>
+                        <span class="icon">📝</span>
+                        주문 전송
+                    </button>
+                    <button id="checkout-btn" class="btn btn-success" disabled>
+                        <span class="icon">💳</span>
+                        결제 완료
+                    </button>
                 </div>
             </div>
         </section>
@@ -145,7 +167,7 @@
         
         // Table selection
         document.querySelectorAll('.table').forEach(button => {
-            button.addEventListener('click', () => {
+            button.addEventListener('click', async () => {
                 document.querySelectorAll('.table').forEach(b => b.classList.remove('selected'));
                 button.classList.add('selected');
                 selectedTable = {
@@ -153,16 +175,45 @@
                     name: button.dataset.tableName
                 };
                 document.getElementById('selected-table').textContent = selectedTable.name;
-                document.getElementById('submit-order-btn').disabled = orderItems.length === 0;
                 
-                // Clear current order when switching tables
-                if (orderItems.length > 0 && !confirm('다른 테이블을 선택하면 현재 주문이 취소됩니다. 계속하시겠습니까?')) {
+                // 테이블의 현재 주문 내역 불러오기
+                try {
+                    const response = await fetch(`/api/tables/${selectedTable.id}/orders`);
+                    if (!response.ok) {
+                        throw new Error('주문 내역을 불러오는데 실패했습니다');
+                    }
+                    
+                    const orders = await response.json();
+                    
+                    // 기존 주문 내역 초기화
+                    orderItems.length = 0;
+                    
+                    // 불러온 주문 내역을 orderItems에 추가
+                    orders.forEach(order => {
+                        orderItems.push({
+                            menu_id: order.menu_id,
+                            name: order.menu_name,
+                            category: order.menu_category,
+                            quantity: order.quantity,
+                            price: order.unit_price
+                        });
+                    });
+                    
+                    // 주문 내역 화면 업데이트
+                    renderOrder();
+                    document.getElementById('submit-order-btn').disabled = orderItems.length === 0;
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    showNotification(error.message, 'error');
+                    
+                    // 에러 발생 시 선택 상태 초기화
                     button.classList.remove('selected');
-                    return;
+                    selectedTable = null;
+                    document.getElementById('selected-table').textContent = '테이블을 선택하세요';
+                    orderItems.length = 0;
+                    renderOrder();
                 }
-                orderItems.length = 0;
-                document.getElementById('order-notes-input').value = '';
-                renderOrder();
             });
         });
         
@@ -203,6 +254,11 @@
                     return;
                 }
                 
+                if (button.classList.contains('disabled')) {
+                    showNotification('현재 판매할 수 없는 메뉴입니다', 'error');
+                    return;
+                }
+                
                 const menuId = parseInt(button.dataset.menuId);
                 const menuName = button.dataset.menuName;
                 const menuPrice = parseFloat(button.dataset.menuPrice);
@@ -218,14 +274,12 @@
                         name: menuName,
                         category: menuCategory,
                         quantity: 1,
-                        price: menuPrice,
-                        notes: ''
+                        price: menuPrice
                     });
                     showNotification(`${menuName}이(가) 추가되었습니다`, 'success');
                 }
                 
                 renderOrder();
-                document.getElementById('submit-order-btn').disabled = false;
             });
         });
         
@@ -327,22 +381,26 @@
 
         // Quantity controls
         document.querySelector('#order-items').addEventListener('click', (e) => {
-            const index = parseInt(e.target.dataset.index);
+            const button = e.target.closest('button');
+            if (!button) return;
+            
+            const index = parseInt(button.dataset.index);
             if (isNaN(index)) return;
             
-            if (e.target.classList.contains('minus')) {
-                if (orderItems[index].quantity > 1) {
-                    orderItems[index].quantity--;
-                    showNotification(`${orderItems[index].name} 수량이 감소되었습니다`, 'info');
+            const item = orderItems[index];
+            
+            if (button.classList.contains('minus')) {
+                if (item.quantity > 1) {
+                    item.quantity--;
+                    showNotification(`${item.name} 수량이 감소되었습니다`, 'info');
                 }
-            } else if (e.target.classList.contains('plus')) {
-                orderItems[index].quantity++;
-                showNotification(`${orderItems[index].name} 수량이 증가되었습니다`, 'info');
-            } else if (e.target.classList.contains('remove-item-btn')) {
-                if (confirm(`${orderItems[index].name}을(를) 주문에서 제거하시겠습니까?`)) {
-                    const itemName = orderItems[index].name;
+            } else if (button.classList.contains('plus')) {
+                item.quantity++;
+                showNotification(`${item.name} 수량이 증가되었습니다`, 'info');
+            } else if (button.classList.contains('delete')) {
+                if (confirm(`${item.name}을(를) 주문에서 제거하시겠습니까?`)) {
                     orderItems.splice(index, 1);
-                    showNotification(`${itemName}이(가) 제거되었습니다`, 'info');
+                    showNotification(`${item.name}이(가) 제거되었습니다`, 'info');
                 }
             }
             
@@ -353,11 +411,11 @@
         function renderOrder() {
             const tbody = document.querySelector('#order-items tbody');
             tbody.innerHTML = '';
-            let total = 0;
+            let subtotal = 0;
             
             orderItems.forEach((item, index) => {
-                const subtotal = item.price * item.quantity;
-                total += subtotal;
+                const itemSubtotal = item.price * item.quantity;
+                subtotal += itemSubtotal;
                 
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
@@ -369,23 +427,26 @@
                     </td>
                     <td>
                         <div class="quantity-control">
-                            <button class="quantity-btn minus" data-index="${index}">-</button>
-                            <span>${item.quantity}</span>
-                            <button class="quantity-btn plus" data-index="${index}">+</button>
+                            <button class="btn-icon minus" data-index="${index}">-</button>
+                            <span class="quantity">${item.quantity}</span>
+                            <button class="btn-icon plus" data-index="${index}">+</button>
                         </div>
                     </td>
-                    <td>$${item.price.toFixed(2)}</td>
-                    <td>$${subtotal.toFixed(2)}</td>
+                    <td class="text-right">₩${formatNumber(item.price)}</td>
+                    <td class="text-right">₩${formatNumber(itemSubtotal)}</td>
                     <td>
-                        <button class="remove-item-btn" data-index="${index}">×</button>
+                        <button class="btn-icon delete" data-index="${index}">×</button>
                     </td>
                 `;
                 
                 tbody.appendChild(tr);
             });
             
-            document.getElementById('order-total').textContent = total.toFixed(2);
+            // 주문 금액 업데이트
+            document.getElementById('order-subtotal').textContent = formatNumber(subtotal);
+            document.getElementById('order-total').textContent = formatNumber(subtotal);
             
+            // 버튼 상태 업데이트
             const hasItems = orderItems.length > 0;
             document.getElementById('submit-order-btn').disabled = !hasItems || !selectedTable;
             document.getElementById('cancel-order-btn').disabled = !hasItems;
@@ -448,6 +509,11 @@
 
         // Initialize
         socket.connect();
+
+        // 숫자 포맷 함수
+        function formatNumber(num) {
+            return new Intl.NumberFormat('ko-KR').format(num);
+        }
     </script>
 </body>
 </html>

@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=db
+      - DB_USER=pos_user
+      - DB_PASSWORD=1234
+      - DB_NAME=pos
+      - PYTHONUNBUFFERED=1
+      - FLASK_ENV=development
+    volumes:
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./app.py:/app/app.py
+    depends_on:
+      - db
+    restart: unless-stopped
+    command: python app.py
+
+  db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=pos
+      - MYSQL_USER=pos_user
+      - MYSQL_PASSWORD=1234
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database_setup.sql:/docker-entrypoint-initdb.d/database_setup.sql
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+    driver: local

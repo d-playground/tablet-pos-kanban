@@ -1,3 +1,10 @@
 # Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
 /deprecated
 deprecated/
+image.png
+docker-compose.yml
+Dockerfile
+database_setup.sql
+wait-for-it.sh
+app.py
+.gitattributes

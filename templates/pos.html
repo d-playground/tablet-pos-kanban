@@ -163,7 +163,8 @@
 
         // State management
         let selectedTable = null;
-        const orderItems = [];
+        let orderItems = [];
+        let selectedTableOrders = [];
         
         // Table selection
         document.querySelectorAll('.table').forEach(button => {
@@ -176,46 +177,100 @@
                 };
                 document.getElementById('selected-table').textContent = selectedTable.name;
                 
-                // 테이블의 현재 주문 내역 불러오기
-                try {
-                    const response = await fetch(`/api/tables/${selectedTable.id}/orders`);
-                    if (!response.ok) {
-                        throw new Error('주문 내역을 불러오는데 실패했습니다');
-                    }
-                    
-                    const orders = await response.json();
-                    
-                    // 기존 주문 내역 초기화
-                    orderItems.length = 0;
-                    
-                    // 불러온 주문 내역을 orderItems에 추가
-                    orders.forEach(order => {
-                        orderItems.push({
-                            menu_id: order.menu_id,
-                            name: order.menu_name,
-                            category: order.menu_category,
-                            quantity: order.quantity,
-                            price: order.unit_price
-                        });
-                    });
-                    
-                    // 주문 내역 화면 업데이트
-                    renderOrder();
-                    document.getElementById('submit-order-btn').disabled = orderItems.length === 0;
-                    
-                } catch (error) {
-                    console.error('Error:', error);
-                    showNotification(error.message, 'error');
-                    
-                    // 에러 발생 시 선택 상태 초기화
-                    button.classList.remove('selected');
-                    selectedTable = null;
-                    document.getElementById('selected-table').textContent = '테이블을 선택하세요';
-                    orderItems.length = 0;
-                    renderOrder();
-                }
+                // Load table orders
+                await loadTableOrders(selectedTable.id);
             });
         });
+        
+        async function loadTableOrders(tableId) {
+            try {
+                const response = await fetch(`/api/tables/${tableId}/orders`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch table orders');
+                }
+                
+                const orders = await response.json();
+                selectedTableOrders = orders;
+                
+                // Filter active orders for the order list
+                orderItems = orders
+                    .filter(order => !['completed', 'cancelled'].includes(order.status))
+                    .map(order => ({
+                        menu_id: order.menu_id,
+                        name: order.menu_name,
+                        category: order.menu_category,
+                        quantity: order.quantity,
+                        price: order.unit_price,
+                        subtotal: order.subtotal,
+                        notes: order.notes
+                    }));
+                
+                renderOrder();
+                renderOrderHistory();
+                
+                // Update button states
+                const hasActiveOrders = orderItems.length > 0;
+                document.getElementById('submit-order-btn').disabled = !hasActiveOrders;
+                document.getElementById('cancel-order-btn').disabled = !hasActiveOrders;
+                document.getElementById('checkout-btn').disabled = !hasActiveOrders;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showNotification(error.message, 'error');
+            }
+        }
+        
+        function renderOrderHistory() {
+            const historyContainer = document.createElement('div');
+            historyContainer.className = 'order-history';
+            
+            // Group orders by status
+            const ordersByStatus = {
+                pending: [],
+                inprogress: [],
+                completed: [],
+                cancelled: []
+            };
+            
+            selectedTableOrders.forEach(order => {
+                ordersByStatus[order.status].push(order);
+            });
+            
+            // Create status sections
+            Object.entries(ordersByStatus).forEach(([status, orders]) => {
+                if (orders.length > 0) {
+                    const section = document.createElement('div');
+                    section.className = `order-section ${status}`;
+                    section.innerHTML = `
+                        <h3>${status.charAt(0).toUpperCase() + status.slice(1)} Orders</h3>
+                        <div class="order-list">
+                            ${orders.map(order => `
+                                <div class="order-item ${status}">
+                                    <div class="order-item-header">
+                                        <span class="menu-name">${order.menu_name}</span>
+                                        <span class="timestamp">${formatTime(order.created_at)}</span>
+                                    </div>
+                                    <div class="order-item-details">
+                                        <span>Quantity: ${order.quantity}</span>
+                                        <span>Total: ₩${formatNumber(order.subtotal)}</span>
+                                    </div>
+                                    ${order.notes ? `<div class="order-notes">${order.notes}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                    historyContainer.appendChild(section);
+                }
+            });
+            
+            // Replace existing history
+            const existingHistory = document.querySelector('.order-history');
+            if (existingHistory) {
+                existingHistory.replaceWith(historyContainer);
+            } else {
+                document.querySelector('.order-items-container').appendChild(historyContainer);
+            }
+        }
         
         // Menu search
         const menuSearch = document.getElementById('menu-search');
@@ -349,9 +404,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        table_id: selectedTable.id,
-                        items: orderItems,
-                        notes: document.getElementById('order-notes-input').value
+                        table_id: selectedTable.id
                     })
                 });
 
@@ -363,12 +416,15 @@
                 showNotification('결제가 완료되었습니다', 'success');
                 
                 // Clear the order and table selection
-                orderItems.length = 0;
+                orderItems = [];
+                selectedTableOrders = [];
                 document.getElementById('order-notes-input').value = '';
                 document.querySelectorAll('.table').forEach(b => b.classList.remove('selected'));
                 selectedTable = null;
                 document.getElementById('selected-table').textContent = '테이블을 선택하세요';
+                
                 renderOrder();
+                renderOrderHistory();
                 
                 // Refresh tables
                 await refreshTables();
@@ -513,6 +569,14 @@
         // 숫자 포맷 함수
         function formatNumber(num) {
             return new Intl.NumberFormat('ko-KR').format(num);
+        }
+
+        // Add these utility functions if not already present
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString('ko-KR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         }
     </script>
 </body>

@@ -110,24 +110,37 @@
         // Fetch and render orders
         async function fetchOrders() {
             try {
+                console.log('Fetching orders...');
                 const [activeOrders, completedOrders] = await Promise.all([
-                    fetch('/api/orders').then(res => res.json()),
+                    fetch('/api/orders').then(res => {
+                        if (!res.ok) throw new Error(`Failed to fetch active orders: ${res.status}`);
+                        return res.json();
+                    }),
                     fetchCompletedOrders()
                 ]);
-
+                
+                console.log('Active orders:', activeOrders);
+                console.log('Completed orders:', completedOrders);
+                
                 renderActiveOrders(activeOrders);
             } catch (error) {
                 console.error('Error fetching orders:', error);
-                showNotification('주문 목록을 불러오는데 실패했습니다', 'error');
+                showNotification('주문 목록을 불러오는데 실패했습니다: ' + error.message, 'error');
             }
         }
 
         async function fetchCompletedOrders() {
             try {
+                console.log('Fetching completed orders...');
                 const response = await fetch(`/api/orders/completed?page=${completedPage}&per_page=${ITEMS_PER_PAGE}`);
-                if (!response.ok) throw new Error('Failed to fetch completed orders');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Failed to fetch completed orders: ${response.status} - ${errorText}`);
+                }
                 
                 const data = await response.json();
+                console.log('Completed orders data:', data);
+                
                 renderCompletedOrders(data.orders, data.total);
                 
                 // Update load more button visibility
@@ -145,19 +158,35 @@
                 return data;
             } catch (error) {
                 console.error('Error fetching completed orders:', error);
-                showNotification('완료된 주문을 불러오는데 실패했습니다', 'error');
+                showNotification('완료된 주문을 불러오는데 실패했습니다: ' + error.message, 'error');
                 throw error;
             }
         }
 
         function renderActiveOrders(orders) {
+            console.log('Rendering active orders:', orders);
             const pendingContainer = document.querySelector('[data-status="pending"]');
             const progressContainer = document.querySelector('[data-status="inprogress"]');
+            
+            if (!pendingContainer || !progressContainer) {
+                console.error('Could not find containers for active orders');
+                return;
+            }
             
             pendingContainer.innerHTML = '';
             progressContainer.innerHTML = '';
             
+            if (!Array.isArray(orders)) {
+                console.error('Orders is not an array:', orders);
+                return;
+            }
+            
             orders.forEach(order => {
+                if (!Array.isArray(order.items)) {
+                    console.error('Order items is not an array:', order);
+                    return;
+                }
+                
                 order.items.forEach(item => {
                     let container;
                     if (item.status === 'pending') {
@@ -166,22 +195,48 @@
                         container = progressContainer;
                     }
                     if (container) {
-                        container.appendChild(createTicket(item, order));
+                        try {
+                            const ticket = createTicket(item, order);
+                            container.appendChild(ticket);
+                        } catch (error) {
+                            console.error('Error creating ticket:', error, item, order);
+                        }
                     }
                 });
             });
         }
 
         function renderCompletedOrders(orders, total) {
+            console.log('Rendering completed orders:', orders);
             const container = document.querySelector('[data-status="completed"]');
+            
+            if (!container) {
+                console.error('Could not find container for completed orders');
+                return;
+            }
             
             if (completedPage === 1) {
                 container.innerHTML = '';
             }
             
+            if (!Array.isArray(orders)) {
+                console.error('Completed orders is not an array:', orders);
+                return;
+            }
+            
             orders.forEach(order => {
+                if (!Array.isArray(order.items)) {
+                    console.error('Order items is not an array:', order);
+                    return;
+                }
+                
                 order.items.forEach(item => {
-                    container.appendChild(createTicket(item, order));
+                    try {
+                        const ticket = createTicket(item, order);
+                        container.appendChild(ticket);
+                    } catch (error) {
+                        console.error('Error creating completed ticket:', error, item, order);
+                    }
                 });
             });
         }
@@ -341,6 +396,43 @@
         function formatNumber(num) {
             return new Intl.NumberFormat('ko-KR').format(num);
         }
+
+        // Initialize
+        socket.connect();
+        
+        // Initial fetch of orders
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchOrders();
+            
+            // Kanban board height setup
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            main.style.height = `calc(100vh - ${header.offsetHeight}px)`;
+            
+            // Initialize Sortable
+            const containers = document.querySelectorAll('.ticket-container');
+            containers.forEach(container => {
+                new Sortable(container, {
+                    group: {
+                        name: 'tickets',
+                        pull: function (to, from) {
+                            return from.el.dataset.status !== 'completed';
+                        },
+                        put: function (to) {
+                            return to.el.dataset.status !== 'completed';
+                        }
+                    },
+                    animation: 150,
+                    ghostClass: 'ticket-ghost',
+                    chosenClass: 'ticket-chosen',
+                    dragClass: 'ticket-drag',
+                    onEnd: handleDragEnd,
+                    delay: 150,
+                    delayOnTouchOnly: true,
+                    touchStartThreshold: 5
+                });
+            });
+        });
     </script>
 </body>
 </html>

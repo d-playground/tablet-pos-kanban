@@ -37,6 +37,13 @@ db_pool = mysql.connector.pooling.MySQLConnectionPool(
     **db_config
 )
 
+ORDER_STATUS = {
+    'PENDING': 'pending',
+    'IN_PROGRESS': 'inprogress',
+    'COMPLETED': 'completed',
+    'CANCELLED': 'cancelled'
+}
+
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 socketio = SocketIO(app)
@@ -253,50 +260,37 @@ def create_order():
         raise InvalidUsage('Failed to create order', status_code=500)
 
 @app.route('/api/orders/<int:item_id>/status', methods=['PUT'])
-def update_order_status(item_id):
+def update_order_item_status(item_id):
     """Update the status of an order item."""
     try:
         data = request.get_json()
-        new_status = data['status']
+        new_status = data.get('status')
         
-        # 이 부분이 데이터베이스의 ENUM 값과 정확히 일치해야 합니다
-        valid_statuses = ['pending', 'inprogress', 'completed', 'cancelled']
+        if not new_status:
+            raise InvalidUsage('Status is required')
+            
+        valid_statuses = [
+            ORDER_STATUS['PENDING'],
+            ORDER_STATUS['IN_PROGRESS'],
+            ORDER_STATUS['COMPLETED'],
+            ORDER_STATUS['CANCELLED']
+        ]
         if new_status not in valid_statuses:
             raise InvalidUsage(f'Invalid status. Must be one of: {", ".join(valid_statuses)}')
         
-        app.logger.info(f"Updating order {item_id} status to {new_status}")  # 로깅 추가
-        
-        try:
-            conn = get_db_connection()
-        except Exception as e:
-            app.logger.error(f"Failed to get database connection: {str(e)}")
-            raise InvalidUsage('Database connection failed', status_code=500)
-            
+        conn = get_db_connection()
         cursor = conn.cursor()
         
-        try:
-            cursor.execute(
-                "SELECT status FROM order_items WHERE id = %s",
-                (item_id,)
-            )
-            current = cursor.fetchone()
-            if not current:
-                raise InvalidUsage('Order item not found', status_code=404)
-                
-            app.logger.info(f"Current status: {current[0]}")  # 로깅 추가
-            
-            cursor.execute(
-                "UPDATE order_items SET status = %s WHERE id = %s",
-                (new_status, item_id)
-            )
-            
-            conn.commit()
-            
-        except mysql.connector.Error as e:
-            app.logger.error(f"MySQL Error: {e.errno} - {e.msg}")  # 상세 에러 로깅
-            raise
-        finally:
-            close_db_connection(conn)
+        cursor.execute(
+            "UPDATE order_items SET status = %s WHERE id = %s",
+            (new_status, item_id)
+        )
+        
+        if cursor.rowcount == 0:
+            raise InvalidUsage('Order item not found', status_code=404)
+        
+        conn.commit()
+        close_db_connection(conn)
         
         # Emit socket event
         socketio.emit('order_status_updated', {
@@ -306,15 +300,13 @@ def update_order_status(item_id):
         
         return jsonify({'success': True})
         
-    except InvalidUsage as e:
-        raise e
-    except KeyError:
-        raise InvalidUsage('Status field is required')
-    except mysql.connector.Error as e:
-        app.logger.error(f"Database error: {str(e)}")
-        raise InvalidUsage(f'Database error: {str(e)}', status_code=500)
+    except InvalidUsage:
+        raise
     except Exception as e:
         app.logger.error(f"Error updating order status: {str(e)}")
+        if 'conn' in locals():
+            conn.rollback()
+            close_db_connection(conn)
         raise InvalidUsage('Failed to update order status', status_code=500)
 
 @app.route('/api/orders/<int:item_id>', methods=['DELETE'])
@@ -509,12 +501,16 @@ def get_orders_stats():
         
         cursor.execute("""
             SELECT 
-                COUNT(CASE WHEN status = '대기중' THEN 1 END) as pending,
-                COUNT(CASE WHEN status = '진행중' THEN 1 END) as in_progress,
-                COUNT(CASE WHEN status = '완료' THEN 1 END) as completed
+                COUNT(CASE WHEN status = %s THEN 1 END) as pending,
+                COUNT(CASE WHEN status = %s THEN 1 END) as in_progress,
+                COUNT(CASE WHEN status = %s THEN 1 END) as completed
             FROM order_items
             WHERE DATE(created_at) = CURDATE()
-        """)
+        """, (
+            ORDER_STATUS['PENDING'],
+            ORDER_STATUS['IN_PROGRESS'],
+            ORDER_STATUS['COMPLETED']
+        ))
         
         stats = cursor.fetchone()
         close_db_connection(conn)
@@ -524,7 +520,8 @@ def get_orders_stats():
     except Exception as e:
         app.logger.error(f"Error fetching order stats: {str(e)}")
         raise InvalidUsage('Failed to fetch order stats', status_code=500)
-
+    
+    
 @app.route('/api/stats/sales/today', methods=['GET'])
 def get_today_sales():
     """Get today's sales statistics."""
@@ -556,50 +553,6 @@ def get_today_sales():
     except Exception as e:
         app.logger.error(f"Error fetching sales stats: {str(e)}")
         raise InvalidUsage('Failed to fetch sales stats', status_code=500)
-
-@app.route('/api/orders/<int:item_id>/status', methods=['PUT'])
-def update_order_item_status(item_id):
-    """Update the status of an order item."""
-    try:
-        data = request.get_json()
-        new_status = data.get('status')
-        
-        if not new_status:
-            raise InvalidUsage('Status is required')
-            
-        if new_status not in ['대기중', '진행중', '완료', '취소']:
-            raise InvalidUsage('Invalid status')
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "UPDATE order_items SET status = %s WHERE id = %s",
-            (new_status, item_id)
-        )
-        
-        if cursor.rowcount == 0:
-            raise InvalidUsage('Order item not found', status_code=404)
-        
-        conn.commit()
-        close_db_connection(conn)
-        
-        # Emit socket event
-        socketio.emit('order_status_updated', {
-            'item_id': item_id,
-            'status': new_status
-        })
-        
-        return jsonify({'success': True})
-        
-    except InvalidUsage:
-        raise
-    except Exception as e:
-        app.logger.error(f"Error updating order status: {str(e)}")
-        if 'conn' in locals():
-            conn.rollback()
-            close_db_connection(conn)
-        raise InvalidUsage('Failed to update order status', status_code=500)
 
 @app.route('/api/orders/<int:item_id>/notes', methods=['PUT'])
 def update_order_notes(item_id):
@@ -656,7 +609,7 @@ def get_completed_orders():
         cursor.execute("""
             SELECT COUNT(DISTINCT oi.id) as total
             FROM order_items oi
-            WHERE oi.status = '완료'
+            WHERE oi.status = 'completed'
         """)
         total = cursor.fetchone()['total']
         
@@ -678,7 +631,7 @@ def get_completed_orders():
             FROM order_items oi
             JOIN menus m ON oi.menu_id = m.id
             JOIN tables t ON oi.table_id = t.id
-            WHERE oi.status = '완료'
+            WHERE oi.status = 'completed'
             ORDER BY oi.created_at DESC
             LIMIT %s OFFSET %s
         """, (per_page, offset))
@@ -725,10 +678,13 @@ def get_completed_orders():
 
 @app.route('/api/orders/complete', methods=['POST'])
 def complete_order():
-    """Complete an order."""
+    """Complete all orders for a table and clear it."""
     try:
         data = request.get_json()
-        validated_data = order_complete_schema.load(data)
+        table_id = data.get('table_id')
+        
+        if not table_id:
+            raise InvalidUsage('Table ID is required')
         
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -746,7 +702,7 @@ def complete_order():
                 AND status NOT IN (%s, %s)
             """, (
                 ORDER_STATUS['COMPLETED'],
-                validated_data['table_id'],
+                table_id,
                 ORDER_STATUS['COMPLETED'],
                 ORDER_STATUS['CANCELLED']
             ))
@@ -756,37 +712,38 @@ def complete_order():
                 UPDATE tables 
                 SET status = 'available' 
                 WHERE id = %s
-            """, (validated_data['table_id'],))
+            """, (table_id,))
             
             conn.commit()
             
-            # Emit socket event to update order status
+            # Emit socket events
             socketio.emit('order_completed', {
-                'table_id': validated_data['table_id']
+                'table_id': table_id
+            })
+            socketio.emit('table_updated', {
+                'table_id': table_id,
+                'status': 'available'
             })
             
             return jsonify({
                 'success': True,
-                'message': 'Order completed successfully'
+                'message': 'Orders completed and table cleared successfully'
             })
             
         except Exception as e:
             conn.rollback()
             raise e
             
-    except ValidationError as ve:
-        app.logger.error(f"Validation error: {str(ve)}")
-        raise InvalidUsage(ve.messages, status_code=400)
     except Exception as e:
-        app.logger.error(f"Error completing order: {str(e)}")
-        raise InvalidUsage('Failed to complete order', status_code=500)
+        app.logger.error(f"Error completing orders: {str(e)}")
+        raise InvalidUsage('Failed to complete orders', status_code=500)
     finally:
         if 'conn' in locals():
             close_db_connection(conn)
 
 @app.route('/api/tables/<int:table_id>/orders', methods=['GET'])
 def get_table_orders(table_id):
-    """Get all active orders for a specific table."""
+    """Get all orders for a specific table, including completed ones."""
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -806,7 +763,6 @@ def get_table_orders(table_id):
             FROM order_items oi
             JOIN menus m ON oi.menu_id = m.id
             WHERE oi.table_id = %s
-            AND oi.status NOT IN ('완료', '취소')
             ORDER BY oi.created_at DESC
         """, (table_id,))
         
@@ -841,11 +797,16 @@ def cancel_order_item(item_id):
             # Update the order item status to cancelled
             cursor.execute("""
                 UPDATE order_items 
-                SET status = '취소',
+                SET status = %s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s 
-                AND status NOT IN ('완료', '취소')
-            """, (item_id,))
+                AND status NOT IN (%s, %s)
+            """, (
+                ORDER_STATUS['CANCELLED'],
+                item_id,
+                ORDER_STATUS['COMPLETED'],
+                ORDER_STATUS['CANCELLED']
+            ))
             
             if cursor.rowcount == 0:
                 raise InvalidUsage('Order item not found or already completed/cancelled', status_code=404)
@@ -853,7 +814,7 @@ def cancel_order_item(item_id):
             conn.commit()
             
             # Emit socket event
-            socketio.emit('order_updated', {'item_id': item_id, 'status': '취소'})
+            socketio.emit('order_updated', {'item_id': item_id, 'status': ORDER_STATUS['CANCELLED']})
             
             return jsonify({
                 'success': True,

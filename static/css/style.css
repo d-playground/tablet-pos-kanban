@@ -1745,3 +1745,69 @@ input[type="number"]:focus {
     background: var(--success-color);
     color: var(--text-primary);
 }
+
+.order-history {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem;
+}
+
+.order-section {
+    margin-bottom: 1.5rem;
+}
+
+.order-section h3 {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.order-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.order-item {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 0.8rem;
+}
+
+.order-item.completed {
+    opacity: 0.7;
+}
+
+.order-item.cancelled {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.order-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.order-item-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.order-notes {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--warning-color);
+    background: var(--bg-secondary);
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.timestamp {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}

@@ -1,4 +1,4 @@
-# Tablet POS System v0.5
+# Tablet POS System
 
 A modern, real-time Point of Sale (POS) system built with Flask and WebSocket, featuring a sleek dark-themed UI and intuitive order management.
 
@@ -36,8 +36,11 @@ A modern, real-time Point of Sale (POS) system built with Flask and WebSocket, f
 - Python 3.8+
 - MySQL 5.7+
 - Modern web browser with WebSocket support
+- Docker (optional)
 
 ### Installation
+
+#### Option 1: Local Installation
 
 1. Clone the repository
 ```bash
@@ -66,9 +69,104 @@ mysql -u root -p < database_setup.sql
 python app.py
 ```
 
+#### Option 2: Docker Installation
+
+1. Clone the repository
+```bash
+git clone [repository-url]
+cd tablet_pos
+```
+
+2. Build the Docker image
+```bash
+docker build -t tablet_pos .
+```
+
+3. Run MySQL container (if you don't have MySQL installed)
+```bash
+docker run --name pos-mysql \
+  -e MYSQL_ROOT_PASSWORD=your_root_password \
+  -e MYSQL_DATABASE=pos \
+  -e MYSQL_USER=pos_user \
+  -e MYSQL_PASSWORD=1234 \
+  -p 3306:3306 \
+  -d mysql:5.7
+```
+
+4. Initialize the database
+```bash
+docker exec -i pos-mysql mysql -uroot -pyour_root_password < database_setup.sql
+```
+
+5. Run the application container
+```bash
+docker run -d \
+  --name tablet_pos \
+  -p 5000:5000 \
+  --link pos-mysql:mysql \
+  -e DB_HOST=mysql \
+  -e DB_USER=pos_user \
+  -e DB_PASSWORD=1234 \
+  -e DB_NAME=pos \
+  tablet_pos
+```
+
 The application will be available at `http://localhost:5000`
 
+### Docker Compose (Recommended)
+
+1. Create a `docker-compose.yml` file:
+```yaml
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=pos_user
+      - DB_PASSWORD=1234
+      - DB_NAME=pos
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:5.7
+    environment:
+      - MYSQL_ROOT_PASSWORD=your_root_password
+      - MYSQL_DATABASE=pos
+      - MYSQL_USER=pos_user
+      - MYSQL_PASSWORD=1234
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database_setup.sql:/docker-entrypoint-initdb.d/database_setup.sql
+
+volumes:
+  mysql_data:
+```
+
+2. Start the application using Docker Compose:
+```bash
+docker-compose up -d
+```
+
+3. Stop the application:
+```bash
+docker-compose down
+```
+
 ## 🔧 Configuration
+
+### Environment Variables
+- `DB_HOST`: Database host (default: localhost)
+- `DB_USER`: Database user (default: pos_user)
+- `DB_PASSWORD`: Database password (default: 1234)
+- `DB_NAME`: Database name (default: pos)
+- `FLASK_ENV`: Application environment (development/production)
 
 ### Database Setup
 The system uses MySQL with the following main tables:
@@ -113,6 +211,7 @@ The system uses MySQL with the following main tables:
 - Flask-SocketIO (WebSocket support)
 - MySQL (Database)
 - MySQL Connector/Python
+- Docker & Docker Compose
 
 ### Frontend
 - Vanilla JavaScript
@@ -125,6 +224,7 @@ The system uses MySQL with the following main tables:
 - Automatic table status management
 - Order history tracking
 - Modern UI/UX design
+- Containerized deployment
 
 ## 📝 API Documentation
 

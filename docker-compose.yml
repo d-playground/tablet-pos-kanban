@@ -6,35 +6,37 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - DB_HOST=db
+      - DB_HOST=mysql
       - DB_USER=pos_user
       - DB_PASSWORD=1234
       - DB_NAME=pos
-      - PYTHONUNBUFFERED=1
-      - FLASK_ENV=development
-    volumes:
-      - ./templates:/app/templates
-      - ./static:/app/static
-      - ./app.py:/app/app.py
+      - FLASK_ENV=production
     depends_on:
-      - db
+      - mysql
     restart: unless-stopped
-    command: python app.py
+    networks:
+      - pos_network
 
-  db:
-    image: mysql:8.0
+  mysql:
+    image: mysql:5.7
     environment:
-      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_ROOT_PASSWORD=your_root_password
       - MYSQL_DATABASE=pos
       - MYSQL_USER=pos_user
       - MYSQL_PASSWORD=1234
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database_setup.sql:/docker-entrypoint-initdb.d/database_setup.sql
-    ports:
-      - "3306:3306"
     restart: unless-stopped
+    networks:
+      - pos_network
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
 
 volumes:
   mysql_data:
-    driver: local
+
+networks:
+  pos_network:
+    driver: bridge

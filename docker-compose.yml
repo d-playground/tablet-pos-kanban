@@ -1,6 +1,28 @@
 version: '3.8'
 
 services:
+  mysql:
+    image: mariadb:10.5
+    environment:
+      - MARIADB_ROOT_PASSWORD=root
+      - MARIADB_DATABASE=pos
+      - MARIADB_USER=pos_user
+      - MARIADB_PASSWORD=1234
+      - MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=no
+      - MARIADB_INITDB_SKIP_TZINFO=yes
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database_setup.sql:/docker-entrypoint-initdb.d/database_setup.sql:ro
+    healthcheck:
+      test: ["CMD", "mariadb", "-upos_user", "-p1234", "-h", "localhost", "-e", "SELECT 1 FROM pos.tables LIMIT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: ['mysqld', '--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+
   web:
     build: .
     ports:
@@ -17,21 +39,9 @@ services:
       - ./static:/app/static
       - ./app.py:/app/app.py
     depends_on:
-      - mysql
-    command: python app.py
-
-  mysql:
-    image: mysql:5.7
-    environment:
-      - MYSQL_ROOT_PASSWORD=root
-      - MYSQL_DATABASE=pos
-      - MYSQL_USER=pos_user
-      - MYSQL_PASSWORD=1234
-    ports:
-      - "3307:3306"  # Expose port for local development
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./database_setup.sql:/docker-entrypoint-initdb.d/database_setup.sql
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   mysql_data:

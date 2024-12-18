@@ -95,35 +95,70 @@ INSERT INTO menus (name, price, category) VALUES
 ('Olive Medley', 6.99, 'Bar Snacks'),
 ('Cheese Board', 15.99, 'Bar Snacks');
 
+-- Insert test orders
+INSERT INTO order_items (table_id, menu_id, quantity, unit_price, status, notes) VALUES
+(1, 1, 2, 12.99, 'pending', 'Extra cold'),
+(1, 2, 1, 13.99, 'pending', 'No ice'),
+(2, 3, 3, 12.99, 'inprogress', 'With lime'),
+(3, 4, 1, 14.99, 'completed', 'Regular');
+
 -- Create triggers
 DELIMITER //
 
-CREATE TRIGGER update_table_status
-AFTER INSERT OR UPDATE OR DELETE ON order_items
+CREATE TRIGGER after_orderitem_insert
+AFTER INSERT ON order_items
 FOR EACH ROW
 BEGIN
-    DECLARE table_id INT;
-    SET table_id = CASE
-        WHEN NEW.table_id IS NOT NULL THEN NEW.table_id
-        ELSE OLD.table_id
-    END;
-    
     UPDATE tables t
     SET status = IF(
         EXISTS(
             SELECT 1 FROM order_items 
-            WHERE table_id = table_id 
+            WHERE table_id = NEW.table_id 
             AND status NOT IN ('completed', 'cancelled')
         ),
         'occupied', 'available'
     )
-    WHERE t.id = table_id;
+    WHERE t.id = NEW.table_id;
+END//
+
+CREATE TRIGGER after_orderitem_update
+AFTER UPDATE ON order_items
+FOR EACH ROW
+BEGIN
+    UPDATE tables t
+    SET status = IF(
+        EXISTS(
+            SELECT 1 FROM order_items 
+            WHERE table_id = NEW.table_id 
+            AND status NOT IN ('completed', 'cancelled')
+        ),
+        'occupied', 'available'
+    )
+    WHERE t.id = NEW.table_id;
+END//
+
+CREATE TRIGGER after_orderitem_delete
+AFTER DELETE ON order_items
+FOR EACH ROW
+BEGIN
+    UPDATE tables t
+    SET status = IF(
+        EXISTS(
+            SELECT 1 FROM order_items 
+            WHERE table_id = OLD.table_id 
+            AND status NOT IN ('completed', 'cancelled')
+        ),
+        'occupied', 'available'
+    )
+    WHERE t.id = OLD.table_id;
 END//
 
 DELIMITER ;
 
 -- Create a dedicated user for the POS application
-CREATE USER IF NOT EXISTS 'pos_user'@'localhost' IDENTIFIED BY '1234';
-GRANT SELECT, INSERT, UPDATE, DELETE ON pos.* TO 'pos_user'@'localhost';
+DROP USER IF EXISTS 'pos_user'@'localhost';
+DROP USER IF EXISTS 'pos_user'@'%';
+CREATE USER 'pos_user'@'%' IDENTIFIED BY '1234';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE ON pos.* TO 'pos_user'@'%';
 FLUSH PRIVILEGES;
   

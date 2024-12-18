@@ -97,8 +97,11 @@
             showNotification('실시간 업데이트 연결에 실패했습니다', 'error');
         });
 
-        ['order_status_updated', 'new_orders', 'order_item_deleted'].forEach(event => {
-            socket.on(event, fetchOrders);
+        ['order_status_updated', 'new_orders', 'order_item_deleted', 'order_completed'].forEach(event => {
+            socket.on(event, (data) => {
+                console.log(`Received ${event} event with data:`, data);
+                fetchOrders();
+            });
         });
 
         // Load more button handler
@@ -111,18 +114,32 @@
         async function fetchOrders() {
             try {
                 console.log('Fetching orders...');
-                const [activeOrders, completedOrders] = await Promise.all([
-                    fetch('/api/orders').then(res => {
-                        if (!res.ok) throw new Error(`Failed to fetch active orders: ${res.status}`);
-                        return res.json();
-                    }),
-                    fetchCompletedOrders()
-                ]);
+                const response = await fetch('/api/orders');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch orders: ${response.status}`);
+                }
                 
-                console.log('Active orders:', activeOrders);
-                console.log('Completed orders:', completedOrders);
+                const orders = await response.json();
+                console.log('Orders received:', orders);
                 
-                renderActiveOrders(activeOrders);
+                // Clear existing tickets
+                document.querySelector('[data-status="pending"]').innerHTML = '';
+                document.querySelector('[data-status="inprogress"]').innerHTML = '';
+                
+                // Render orders
+                orders.forEach(table => {
+                    table.items.forEach(item => {
+                        const container = document.querySelector(`[data-status="${item.status}"]`);
+                        if (container) {
+                            const ticket = createTicket(item, table);
+                            container.appendChild(ticket);
+                        }
+                    });
+                });
+                
+                // Fetch completed orders separately
+                await fetchCompletedOrders();
+                
             } catch (error) {
                 console.error('Error fetching orders:', error);
                 showNotification('주문 목록을 불러오는데 실패했습니다: ' + error.message, 'error');
@@ -241,7 +258,7 @@
             });
         }
 
-        function createTicket(item, order) {
+        function createTicket(item, table) {
             const ticket = document.createElement('div');
             ticket.className = 'ticket';
             ticket.dataset.itemId = item.id;
@@ -254,7 +271,7 @@
             
             ticket.innerHTML = `
                 <div class="ticket-header">
-                    <h3>${order.table_name}</h3>
+                    <h3>${table.table_name}</h3>
                     <span class="timestamp">${timeString}</span>
                 </div>
                 <div class="ticket-content">
@@ -272,6 +289,7 @@
                     ${item.notes ? `<div class="notes">${item.notes}</div>` : ''}
                 </div>
             `;
+            
             return ticket;
         }
 

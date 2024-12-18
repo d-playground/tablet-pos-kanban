@@ -11,8 +11,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from marshmallow import Schema, fields, validate, ValidationError
-import mysql.connector
-from mysql.connector import pooling
+import mariadb
 
 # Load environment variables
 DB_HOST = os.environ.get('DB_HOST', 'localhost')
@@ -33,21 +32,29 @@ db_config = {
     'host': DB_HOST,
     'user': DB_USER,
     'password': DB_PASSWORD,
-    'database': DB_NAME,
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_general_ci'
+    'database': DB_NAME
 }
-
-# Create a database connection pool
-db_pool = mysql.connector.pooling.MySQLConnectionPool(
-    pool_name="pos_pool",
-    pool_size=5,
-    **db_config
-)
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 socketio = SocketIO(app)
+
+# Utility functions
+def get_db_connection():
+    """Get a database connection."""
+    try:
+        return mariadb.connect(**db_config)
+    except mariadb.Error as e:
+        app.logger.error(f"Error connecting to MariaDB: {e}")
+        raise
+
+def close_db_connection(conn):
+    """Close the database connection."""
+    if conn:
+        try:
+            conn.close()
+        except mariadb.Error as e:
+            app.logger.error(f"Error closing connection: {e}")
 
 # Custom exception class
 class InvalidUsage(Exception):
@@ -73,14 +80,6 @@ class OrderCompleteSchema(Schema):
     notes = fields.Str(allow_none=True)
 
 order_complete_schema = OrderCompleteSchema()
-
-# Utility functions
-def get_db_connection():
-    return db_pool.get_connection()
-
-def close_db_connection(conn):
-    if conn:
-        conn.close()
 
 # Route handlers
 @app.route('/')
@@ -149,12 +148,17 @@ def get_orders():
             FROM order_items oi
             JOIN menus m ON oi.menu_id = m.id
             JOIN tables t ON oi.table_id = t.id
-            WHERE oi.status NOT IN ('completed', 'cancelled')
+            WHERE oi.status IN ('pending', 'inprogress')
             ORDER BY oi.created_at DESC
         """)
         
         items = cursor.fetchall()
-        close_db_connection(conn)
+        
+        # Convert decimal values to float for JSON serialization
+        for item in items:
+            item['unit_price'] = float(item['unit_price'])
+            item['subtotal'] = float(item['subtotal'])
+            item['created_at'] = item['created_at'].isoformat()
         
         # Group items by table
         tables = {}
@@ -166,24 +170,16 @@ def get_orders():
                     'table_name': item['table_name'],
                     'items': []
                 }
-            tables[table_id]['items'].append({
-                'id': item['id'],
-                'menu_id': item['menu_id'],
-                'menu_name': item['menu_name'],
-                'menu_category': item['menu_category'],
-                'quantity': item['quantity'],
-                'unit_price': float(item['unit_price']),
-                'subtotal': float(item['subtotal']),
-                'status': item['status'],
-                'notes': item['notes'],
-                'created_at': item['created_at'].isoformat()
-            })
+            tables[table_id]['items'].append(item)
         
         return jsonify(list(tables.values()))
         
     except Exception as e:
         app.logger.error(f"Error fetching orders: {str(e)}")
         raise InvalidUsage('Failed to fetch orders', status_code=500)
+    finally:
+        if 'conn' in locals():
+            close_db_connection(conn)
 
 @app.route('/api/orders', methods=['POST'])
 def create_order():

@@ -20,6 +20,14 @@ DB_USER = os.environ.get('DB_USER', 'pos_user')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', '1234')
 DB_NAME = os.environ.get('DB_NAME', 'pos')
 
+# Constants
+ORDER_STATUS = {
+    'PENDING': 'pending',
+    'IN_PROGRESS': 'inprogress',
+    'COMPLETED': 'completed',
+    'CANCELLED': 'cancelled'
+}
+
 # Database configuration
 db_config = {
     'host': DB_HOST,
@@ -37,32 +45,18 @@ db_pool = mysql.connector.pooling.MySQLConnectionPool(
     **db_config
 )
 
-ORDER_STATUS = {
-    'PENDING': 'pending',
-    'IN_PROGRESS': 'inprogress',
-    'COMPLETED': 'completed',
-    'CANCELLED': 'cancelled'
-}
-
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 socketio = SocketIO(app)
 
 # Custom exception class
 class InvalidUsage(Exception):
-    status_code = 400
-
-    def __init__(self, message, status_code=None, payload=None):
-        super().__init__(self)
+    def __init__(self, message, status_code=400):
         self.message = message
-        if status_code is not None:
-            self.status_code = status_code
-        self.payload = payload
+        self.status_code = status_code
 
     def to_dict(self):
-        rv = dict(self.payload or ())
-        rv['message'] = self.message
-        return rv
+        return {'message': self.message}
 
 # Marshmallow schemas for input validation
 class OrderItemSchema(Schema):
@@ -80,26 +74,13 @@ class OrderCompleteSchema(Schema):
 
 order_complete_schema = OrderCompleteSchema()
 
-# Constants for order status
-ORDER_STATUS = {
-    'PENDING': 'pending',
-    'IN_PROGRESS': 'inprogress',
-    'COMPLETED': 'completed',
-    'CANCELLED': 'cancelled'
-}
-
 # Utility functions
 def get_db_connection():
-    """Get a database connection from the pool."""
-    try:
-        return db_pool.get_connection()
-    except Exception as e:
-        app.logger.error(f"Database connection error: {str(e)}")
-        raise InvalidUsage('Database connection failed', status_code=500)
+    return db_pool.get_connection()
 
 def close_db_connection(conn):
-    """Close the database connection."""
-    conn.close()
+    if conn:
+        conn.close()
 
 # Route handlers
 @app.route('/')
@@ -378,7 +359,7 @@ def get_tables():
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
             SELECT t.*, 
-                   COUNT(CASE WHEN oi.status NOT IN ('완료', '취소') THEN 1 END) as active_items
+                   COUNT(CASE WHEN oi.status NOT IN ('completed', 'cancelled') THEN 1 END) as active_items
             FROM tables t
             LEFT JOIN order_items oi ON t.id = oi.table_id
             GROUP BY t.id
@@ -678,68 +659,35 @@ def get_completed_orders():
 
 @app.route('/api/orders/complete', methods=['POST'])
 def complete_order():
-    """Complete all orders for a table and clear it."""
+    """Complete all orders for a table."""
     try:
-        data = request.get_json()
-        table_id = data.get('table_id')
-        
+        table_id = request.get_json().get('table_id')
         if not table_id:
             raise InvalidUsage('Table ID is required')
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Start transaction
-        conn.start_transaction()
+        # Update all active orders to completed
+        cursor.execute("""
+            UPDATE order_items 
+            SET status = 'completed'
+            WHERE table_id = %s 
+            AND status NOT IN ('completed', 'cancelled')
+        """, (table_id,))
         
-        try:
-            # Update all active order items for the table to completed status
-            cursor.execute("""
-                UPDATE order_items 
-                SET status = %s, 
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE table_id = %s 
-                AND status NOT IN (%s, %s)
-            """, (
-                ORDER_STATUS['COMPLETED'],
-                table_id,
-                ORDER_STATUS['COMPLETED'],
-                ORDER_STATUS['CANCELLED']
-            ))
-            
-            # Update table status to available
-            cursor.execute("""
-                UPDATE tables 
-                SET status = 'available' 
-                WHERE id = %s
-            """, (table_id,))
-            
-            conn.commit()
-            
-            # Emit socket events
-            socketio.emit('order_completed', {
-                'table_id': table_id
-            })
-            socketio.emit('table_updated', {
-                'table_id': table_id,
-                'status': 'available'
-            })
-            
-            return jsonify({
-                'success': True,
-                'message': 'Orders completed and table cleared successfully'
-            })
-            
-        except Exception as e:
-            conn.rollback()
-            raise e
-            
+        conn.commit()
+        close_db_connection(conn)
+        
+        # Emit socket events
+        socketio.emit('order_completed', {'table_id': table_id})
+        socketio.emit('table_updated', {'table_id': table_id})
+        
+        return jsonify({'success': True})
+        
     except Exception as e:
         app.logger.error(f"Error completing orders: {str(e)}")
-        raise InvalidUsage('Failed to complete orders', status_code=500)
-    finally:
-        if 'conn' in locals():
-            close_db_connection(conn)
+        raise InvalidUsage('Failed to complete orders')
 
 @app.route('/api/tables/<int:table_id>/orders', methods=['GET'])
 def get_table_orders(table_id):

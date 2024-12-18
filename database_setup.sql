@@ -44,6 +44,7 @@ CREATE INDEX idx_menu_category ON menus(category);
 CREATE INDEX idx_orderitem_status ON order_items(status);
 CREATE INDEX idx_orderitem_table ON order_items(table_id);
 CREATE INDEX idx_orderitem_created ON order_items(created_at);
+CREATE INDEX idx_orderitem_updated ON order_items(updated_at);
 
 -- Create views for analytics
 CREATE OR REPLACE VIEW daily_sales AS
@@ -97,35 +98,26 @@ INSERT INTO menus (name, price, category) VALUES
 -- Create triggers
 DELIMITER //
 
-CREATE TRIGGER after_orderitem_insert
-AFTER INSERT ON order_items
+CREATE TRIGGER update_table_status
+AFTER INSERT OR UPDATE OR DELETE ON order_items
 FOR EACH ROW
 BEGIN
-    UPDATE tables 
-    SET status = 'occupied'
-    WHERE id = NEW.table_id;
-END//
-
-CREATE TRIGGER after_orderitem_update
-AFTER UPDATE ON order_items
-FOR EACH ROW
-BEGIN
-    DECLARE active_items INT;
+    DECLARE table_id INT;
+    SET table_id = CASE
+        WHEN NEW.table_id IS NOT NULL THEN NEW.table_id
+        ELSE OLD.table_id
+    END;
     
-    SELECT COUNT(*) INTO active_items
-    FROM order_items
-    WHERE table_id = NEW.table_id
-    AND status NOT IN ('completed', 'cancelled');
-    
-    IF active_items = 0 THEN
-        UPDATE tables 
-        SET status = 'available'
-        WHERE id = NEW.table_id;
-    ELSE
-        UPDATE tables 
-        SET status = 'occupied'
-        WHERE id = NEW.table_id;
-    END IF;
+    UPDATE tables t
+    SET status = IF(
+        EXISTS(
+            SELECT 1 FROM order_items 
+            WHERE table_id = table_id 
+            AND status NOT IN ('completed', 'cancelled')
+        ),
+        'occupied', 'available'
+    )
+    WHERE t.id = table_id;
 END//
 
 DELIMITER ;

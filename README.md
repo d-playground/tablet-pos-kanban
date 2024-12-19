@@ -1,4 +1,10 @@
-# Tablet POS System
+# Tablet POS System (v0.9)
+
+![image](https://github.com/user-attachments/assets/0508a6d7-d38a-40d7-be0e-c05528c2b094)
+![image](https://github.com/user-attachments/assets/82ccc075-2476-4475-917a-084ef637a9a3)
+
+
+You can test [here]([url](http://15.165.189.74:5555/))
 
 A modern, real-time Point of Sale (POS) system built with Flask and WebSocket, featuring a sleek dark-themed UI and intuitive order management.
 

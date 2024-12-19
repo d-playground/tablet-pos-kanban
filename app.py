@@ -800,7 +800,7 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_ENV') == 'development'
     socketio.run(app, 
         host='0.0.0.0', 
-        port=5000, 
+        port=5555, 
         debug=debug,
         use_reloader=debug
     )

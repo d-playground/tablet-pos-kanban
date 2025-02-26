@@ -4,7 +4,8 @@
 ![image](https://github.com/user-attachments/assets/82ccc075-2476-4475-917a-084ef637a9a3)
 
 
-You can test here: http://15.165.189.74:5555/
+~You can test here: http://15.165.189.74:5555/~ 
+!Link has expired / 1.0v continues on private repo!
 
 A modern, real-time Point of Sale (POS) system built with Flask and WebSocket, featuring a sleek dark-themed UI and intuitive order management.
 
